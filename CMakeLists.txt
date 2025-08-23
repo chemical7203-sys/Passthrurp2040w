@@ -25,10 +25,6 @@ endif()
 # ====================================================================================
 set(PICO_BOARD pico_w CACHE STRING "Board type")
 
-# We need to turn off the default descriptor, so the CMAKE variable must be set
-# before pico_sdk_init() is called
-set(PICO_STDIO_USB_NO_DEFAULT_DESCRIPTOR 1 CACHE BOOL "Disable default USB descriptors")
-
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
@@ -36,6 +32,11 @@ project(RP C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
+
+# Add TinyUSB as a subdirectory to ensure it is built and linked correctly
+if (PICO_SDK_PATH)
+    add_subdirectory(${PICO_SDK_PATH}/lib/tinyusb tinyusb_build)
+endif()
 
 # Add executable. Default name is the project name, version 0.1
 add_executable(RP
@@ -56,7 +57,7 @@ pico_generate_pio_header(RP ${CMAKE_CURRENT_LIST_DIR}/blink.pio)
 
 # Modify the below lines to enable/disable output over UART/USB
 pico_enable_stdio_uart(RP 1)
-pico_enable_stdio_usb(RP 1) # Must be enabled for composite device
+pico_enable_stdio_usb(RP 0) # Disabled for HID-only device
 
 # Add the standard library to the build
 target_link_libraries(RP
@@ -68,7 +69,7 @@ target_include_directories(RP PRIVATE
 )
 
 # Add any user requested libraries
-target_link_libraries(RP 
+target_link_libraries(RP
         hardware_i2c
         hardware_dma
         hardware_pio
@@ -76,7 +77,7 @@ target_link_libraries(RP
         hardware_timer
         hardware_clocks
         pico_cyw43_arch_lwip_poll
-        pico_tinyusb_device
+        tinyusb_device
         )
 
 pico_add_extra_outputs(RP)
