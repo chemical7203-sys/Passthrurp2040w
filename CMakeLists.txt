@@ -27,7 +27,7 @@ set(PICO_BOARD pico_w CACHE STRING "Board type")
 
 # We need to turn off the default descriptor, so the CMAKE variable must be set
 # before pico_sdk_init() is called
-set(PICO_STDIO_USB_NO_DEFAULT_DESCRIPTOR 1)
+set(PICO_STDIO_USB_NO_DEFAULT_DESCRIPTOR 1 CACHE BOOL "Disable default USB descriptors")
 
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
