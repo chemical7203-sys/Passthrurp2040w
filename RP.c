@@ -3,6 +3,7 @@
 #include "pico/stdlib.h"
 #include "hardware/uart.h"
 #include "tusb.h"
+#include "bsp/board.h"
 #include "usb_descriptors.h"
 
 /*
