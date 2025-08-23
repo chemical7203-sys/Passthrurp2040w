@@ -35,7 +35,10 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(RP RP.c )
+add_executable(RP
+        RP.c
+        usb_descriptors.c
+        )
 
 pico_set_program_name(RP "RP")
 pico_set_program_version(RP "0.1")
@@ -65,6 +68,7 @@ target_link_libraries(RP
         hardware_timer
         hardware_clocks
         pico_cyw43_arch_lwip_poll
+        pico_tinyusb_device
         )
 
 pico_add_extra_outputs(RP)
