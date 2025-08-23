@@ -1,11 +1,26 @@
-from inputs import devices
+import pygame
 from serial.tools import list_ports
 
 def get_available_gamepads():
-    """Returns a list of available gamepad devices."""
-    gamepads = devices.gamepads
+    """Returns a list of available gamepad devices using pygame."""
+    pygame.init()
+    pygame.joystick.init()
+
+    gamepads = []
+    for i in range(pygame.joystick.get_count()):
+        joystick = pygame.joystick.Joystick(i)
+        joystick.init()
+        gamepads.append({
+            "index": i,
+            "name": joystick.get_name(),
+        })
+
+    # It's good practice to quit the joystick subsystem after scanning
+    pygame.joystick.quit()
+    pygame.quit()
+
     if not gamepads:
-        print("No gamepads found.")
+        print("No gamepads found by pygame.")
     return gamepads
 
 def get_available_serial_ports():
@@ -17,11 +32,13 @@ def get_available_serial_ports():
 
 # This block allows for standalone testing of this module
 if __name__ == '__main__':
-    print("--- Available Gamepads ---")
+    print("--- Testing Device Manager with Pygame ---")
+
+    print("\n--- Available Gamepads ---")
     gamepad_list = get_available_gamepads()
     if gamepad_list:
-        for i, gamepad in enumerate(gamepad_list):
-            print(f"  {i}: {gamepad}")
+        for gamepad in gamepad_list:
+            print(f"  Index {gamepad['index']}: {gamepad['name']}")
 
     print("\n--- Available Serial Ports ---")
     port_list = get_available_serial_ports()

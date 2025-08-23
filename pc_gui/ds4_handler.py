@@ -1,73 +1,106 @@
 import threading
 import time
-from inputs import GamePad
+import pygame
 
-# This class will run in a separate thread to continuously read gamepad events
 class DS4Handler(threading.Thread):
-    def __init__(self, signals, device_path=None):
+    """
+    This class runs in a separate thread to continuously read gamepad events
+    using the Pygame library.
+    """
+    def __init__(self, signals):
         super().__init__()
         self.daemon = True
         self.signals = signals
-        self.device_path = device_path
+        self.joystick_index = None
+        self.joystick = None
         self._running = True
-        self._last_states = {}
 
-    def set_device(self, device_path):
-        """Sets the device to listen to."""
-        self.device_path = device_path
+    def set_device(self, joystick_index):
+        """Sets the device index to listen to."""
+        self.joystick_index = joystick_index
+        # Signal the thread to re-initialize the joystick
+        if self.joystick:
+            self.joystick.quit()
+            self.joystick = None
 
     def stop(self):
         self._running = False
 
     def run(self):
         """The main loop of the thread."""
-        print("DS4 handler thread started.")
+        print("Pygame handler thread started.")
+        pygame.init()
+        pygame.joystick.init()
+
         while self._running:
-            if not self.device_path:
-                # Wait until a device is selected
+            if self.joystick_index is None:
                 time.sleep(0.5)
                 continue
 
             try:
-                # Use a specific gamepad device
-                gamepad = GamePad(self.device_path)
-                print(f"Listening to gamepad: {self.device_path}")
-                while self._running:
-                    # This call blocks until an event occurs
-                    events = gamepad.read()
-                    for event in events:
-                        if not self._running:
-                            break
-                        self._process_event(event)
-            except Exception as e:
-                print(f"Error with gamepad {self.device_path}: {e}")
-                # A device might have been disconnected, wait for a new one to be selected
+                if self.joystick is None:
+                    self.joystick = pygame.joystick.Joystick(self.joystick_index)
+                    self.joystick.init()
+                    print(f"Listening to gamepad index: {self.joystick_index} ({self.joystick.get_name()})")
+
+                # Pygame's event loop
+                for event in pygame.event.get():
+                    if not self._running:
+                        break
+                    self._process_event(event)
+
+                time.sleep(0.01) # Small sleep to prevent busy-looping
+
+            except pygame.error as e:
+                print(f"Error with gamepad index {self.joystick_index}: {e}")
                 self.signals.gamepad_disconnected.emit()
-                self.device_path = None # Stop listening
+                self.joystick_index = None
+                self.joystick = None
                 print("Waiting for new gamepad selection...")
 
+        pygame.quit()
+        print("Pygame handler thread stopped.")
+
     def _process_event(self, event):
-        """Processes a single event and emits a signal if the state changed."""
-        event_key = f"{event.ev_type}-{event.code}"
+        """Processes a single pygame event and emits a signal."""
+        if event.type == pygame.JOYAXISMOTION:
+            # Axis 0: Left Stick X, Axis 1: Left Stick Y
+            # Axis 2: L2 Trigger, Axis 3: Right Stick X, Axis 4: Right Stick Y, Axis 5: R2 Trigger
+            # Pygame axes are -1.0 to 1.0. Triggers are -1.0 (released) to 1.0 (pressed).
+            # We need to convert them to our 0-255 range.
+            value = int((event.value + 1) / 2 * 255) # Scale -1..1 to 0..255
 
-        if self._last_states.get(event_key) == event.state:
-            return
+            if event.axis == 0: self.signals.stick_event.emit('ABS_X', value)
+            elif event.axis == 1: self.signals.stick_event.emit('ABS_Y', value)
+            elif event.axis == 2: self.signals.trigger_event.emit('ABS_Z', value) # L2
+            elif event.axis == 5: self.signals.trigger_event.emit('ABS_RZ', value) # R2
 
-        self._last_states[event_key] = event.state
+        elif event.type == pygame.JOYBUTTONDOWN or event.type == pygame.JOYBUTTONUP:
+            pressed = (event.type == pygame.JOYBUTTONDOWN)
+            # Mapping based on common DS4 layout in pygame
+            button_map = {
+                0: 'BTN_SOUTH', # X
+                1: 'BTN_EAST',  # Circle
+                2: 'BTN_WEST',  # Square
+                3: 'BTN_NORTH', # Triangle
+                4: 'BTN_TL',    # L1
+                5: 'BTN_TR',    # R1
+                8: 'BTN_SELECT',# Share
+                9: 'BTN_START', # Options
+                10: 'BTN_THUMBL',# L3
+                11: 'BTN_THUMBR',# R3
+            }
+            if event.button in button_map:
+                self.signals.button_event.emit(button_map[event.button], pressed)
 
-        # --- Mapping and Signal Emitting ---
-        if event.code in ['ABS_X', 'ABS_Y', 'ABS_RX', 'ABS_RY']:
-            self.signals.stick_event.emit(event.code, event.state)
-        elif event.code in ['ABS_Z', 'ABS_RZ']:
-            self.signals.trigger_event.emit(event.code, event.state)
-        elif event.code in ['BTN_SOUTH', 'BTN_EAST', 'BTN_WEST', 'BTN_NORTH',
-                            'BTN_TL', 'BTN_TR', 'BTN_SELECT', 'BTN_START',
-                            'BTN_THUMBL', 'BTN_THUMBR']:
-            self.signals.button_event.emit(event.code, bool(event.state))
-        elif event.code in ['ABS_HAT0X', 'ABS_HAT0Y']:
-            self.signals.dpad_event.emit(event.code, event.state)
+        elif event.type == pygame.JOYHATMOTION:
+            # Hat 0 is the D-Pad
+            if event.hat == 0:
+                x, y = event.value
+                self.signals.dpad_event.emit('ABS_HAT0X', x)
+                self.signals.dpad_event.emit('ABS_HAT0Y', -y) # Pygame y is inverted
 
-# Standalone testing is no longer practical as it requires a specific device path
+# Standalone testing
 if __name__ == '__main__':
     print("This module is not meant to be run standalone anymore.")
     print("Please run main.py")

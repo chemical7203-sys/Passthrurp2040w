@@ -54,18 +54,18 @@ class MainApplication:
     def refresh_gamepads(self):
         self.ui.gamepad_select.clear()
         self.gamepads = get_available_gamepads()
-        self.ui.gamepad_select.addItem("Select a gamepad...", None)
-        for i, gamepad in enumerate(self.gamepads):
-            self.ui.gamepad_select.addItem(gamepad.name, gamepad.path)
+        self.ui.gamepad_select.addItem("Select a gamepad...", -1) # Use -1 for invalid index
+        for gamepad in self.gamepads:
+            self.ui.gamepad_select.addItem(gamepad['name'], gamepad['index'])
 
     def select_gamepad(self, index):
         """Starts listening to the selected gamepad."""
-        if index <= 0: # "Select a gamepad..."
+        joystick_index = self.ui.gamepad_select.itemData(index)
+        if joystick_index < 0:
             self.ds4_handler.set_device(None)
             return
 
-        device_path = self.ui.gamepad_select.itemData(index)
-        self.ds4_handler.set_device(device_path)
+        self.ds4_handler.set_device(joystick_index)
 
     def handle_gamepad_disconnect(self):
         QMessageBox.warning(self.ui, "Gamepad Disconnected", "The connection to the gamepad was lost.")
