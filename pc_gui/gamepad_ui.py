@@ -1,6 +1,6 @@
 import sys
 from PyQt6.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QGridLayout, QComboBox,
+    QApplication, QWidget, QLabel, QVBoxLayout, QGridLayout, QComboBox,
     QPushButton, QHBoxLayout, QGraphicsView, QGraphicsScene, QGraphicsEllipseItem,
     QGraphicsRectItem
 )

@@ -1,6 +1,6 @@
 import threading
 import time
-from inputs import Gamepad
+from inputs import GamePad
 
 # This class will run in a separate thread to continuously read gamepad events
 class DS4Handler(threading.Thread):
@@ -30,7 +30,7 @@ class DS4Handler(threading.Thread):
 
             try:
                 # Use a specific gamepad device
-                gamepad = Gamepad(self.device_path)
+                gamepad = GamePad(self.device_path)
                 print(f"Listening to gamepad: {self.device_path}")
                 while self._running:
                     # This call blocks until an event occurs
