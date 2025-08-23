@@ -3,7 +3,7 @@
 #include "pico/stdlib.h"
 #include "hardware/uart.h"
 #include "tusb.h"
-#include "bsp/board.h"
+#include "pico/time.h"
 #include "usb_descriptors.h"
 
 /*
@@ -107,7 +107,7 @@ void hid_task(void)
   const uint32_t interval_ms = 10;
   static uint32_t start_ms = 0;
 
-  if ( board_millis() - start_ms < interval_ms) return; // not enough time
+  if ( to_ms_since_boot(get_absolute_time()) - start_ms < interval_ms) return; // not enough time
   start_ms += interval_ms;
 
   // Remote wakeup
