@@ -8,9 +8,9 @@
 //--------------------------------------------------------------------
 // COMMON CONFIGURATION
 //--------------------------------------------------------------------
-#define CFG_TUD_MCU             OPT_MCU_RP2040
-#define CFG_TUD_OS              OPT_OS_PICO
-#define CFG_TUD_ENDPOINT0_SIZE  64
+// This file is included by `tusb_option.h`, which defines the `OPT_*` macros.
+// We cannot use them here. The Pico SDK build system will set the MCU, OS, and
+// endpoint 0 size correctly. We only need to override the class drivers.
 
 //--------------------------------------------------------------------
 // CLASS DRIVER CONFIG
