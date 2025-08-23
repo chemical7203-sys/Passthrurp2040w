@@ -40,6 +40,11 @@ add_executable(RP
         usb_descriptors.c
         )
 
+# Add compile definition to enable TinyUSB HID class
+target_compile_definitions(RP PRIVATE
+    CFG_TUD_HID=1
+)
+
 pico_set_program_name(RP "RP")
 pico_set_program_version(RP "0.1")
 
