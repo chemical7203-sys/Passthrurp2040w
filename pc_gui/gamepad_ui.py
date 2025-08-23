@@ -1,135 +1,134 @@
 import sys
 from PyQt6.QtWidgets import (
-    QApplication, QWidget, QLabel, QVBoxLayout, QGridLayout, QProgressBar,
-    QLineEdit, QPushButton, QHBoxLayout
+    QApplication, QWidget, QVBoxLayout, QGridLayout, QComboBox,
+    QPushButton, QHBoxLayout, QGraphicsView, QGraphicsScene, QGraphicsEllipseItem,
+    QGraphicsRectItem
 )
-from PyQt6.QtGui import QFont, QColor
-from PyQt6.QtCore import Qt, QObject, pyqtSignal
+from PyQt6.QtGui import QFont, QColor, QBrush, QPen
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, QRectF
 
-# A separate class for defining PyQt signals.
-# This helps keep the code organized.
+# --- Signals ---
 class GamepadSignals(QObject):
-    stick_event = pyqtSignal(str, int)      # e.g., ('ABS_X', 128)
-    trigger_event = pyqtSignal(str, int)    # e.g., ('ABS_Z', 255)
-    button_event = pyqtSignal(str, bool)    # e.g., ('BTN_SOUTH', True)
-    dpad_event = pyqtSignal(str, int)        # e.g., ('ABS_HAT0X', 1)
+    stick_event = pyqtSignal(str, int)
+    trigger_event = pyqtSignal(str, int)
+    button_event = pyqtSignal(str, bool)
+    dpad_event = pyqtSignal(str, int)
+    gamepad_disconnected = pyqtSignal()
 
+# --- Gamepad Graphics Widget ---
+class GamepadWidget(QGraphicsView):
+    """A widget that draws a visual representation of the gamepad."""
+    def __init__(self):
+        super().__init__()
+        self.scene = QGraphicsScene(self)
+        self.setScene(self.scene)
+        self.setFixedSize(400, 200)
 
+        # Colors
+        self.bg_color = QColor("#e0e0e0")
+        self.body_color = QColor("#cccccc")
+        self.stick_bg_color = QColor("#bbbbbb")
+        self.stick_color = QColor("#666666")
+        self.btn_off_color = QColor("#aaaaaa")
+        self.btn_on_color = QColor("#3399ff")
+
+        self.scene.setBackgroundBrush(self.bg_color)
+        self._draw_layout()
+
+    def _draw_layout(self):
+        # Gamepad Body
+        self.scene.addRect(0, 25, 400, 150, QPen(self.body_color), QBrush(self.body_color))
+
+        # Stick Backgrounds
+        self.scene.addEllipse(50, 50, 80, 80, QPen(self.stick_bg_color), QBrush(self.stick_bg_color))
+
+        # Movable Stick Item (origin at center of its background)
+        self.left_stick = QGraphicsEllipseItem(-15, -15, 30, 30)
+        self.left_stick.setBrush(QBrush(self.stick_color))
+        self.left_stick.setPos(90, 90) # Start at center (50 + 80/2, 50 + 80/2)
+        self.scene.addItem(self.left_stick)
+
+        # Button Items
+        self.btn_south = self._create_button_item(280, 95) # 'A'
+        self.btn_east = self._create_button_item(315, 65)  # 'B'
+
+    def _create_button_item(self, x, y):
+        item = QGraphicsEllipseItem(-10, -10, 20, 20)
+        item.setBrush(QBrush(self.btn_off_color))
+        item.setPos(x, y)
+        self.scene.addItem(item)
+        return item
+
+    # --- SLOTS for updating graphics ---
+    def update_stick(self, code, value):
+        # Map 0-255 value to a position offset
+        offset = (value - 128) / 128.0 * 30 # Max offset of 30 pixels
+        if code == 'ABS_X':
+            current_y = self.left_stick.y()
+            self.left_stick.setPos(90 + offset, current_y)
+        elif code == 'ABS_Y':
+            current_x = self.left_stick.x()
+            self.left_stick.setPos(current_x, 90 + offset)
+
+    def update_button(self, code, pressed):
+        item = None
+        if code == 'BTN_SOUTH':
+            item = self.btn_south
+        elif code == 'BTN_EAST':
+            item = self.btn_east
+
+        if item:
+            item.setBrush(QBrush(self.btn_on_color) if pressed else QBrush(self.btn_off_color))
+
+# --- Main UI Window ---
 class GamepadUI(QWidget):
-    """This class sets up the UI layout and provides slots to update it."""
+    """The main window containing the gamepad display and connection controls."""
     def __init__(self):
         super().__init__()
         self.initUI()
 
-        # A map to easily find button labels by their code
-        self.button_labels = {
-            'BTN_SOUTH': self.btn_south_label,
-            'BTN_EAST': self.btn_east_label
-        }
-
     def initUI(self):
         self.setWindowTitle('RP2040 Gamepad Passthrough')
-        self.setGeometry(100, 100, 450, 350)
-
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
-        title = QLabel('DS4 Controller Status')
-        title.setFont(QFont('Arial', 18, QFont.Weight.Bold))
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_layout.addWidget(title)
+        # Add the new graphics widget
+        self.gamepad_widget = GamepadWidget()
+        main_layout.addWidget(self.gamepad_widget, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        grid = QGridLayout()
-        main_layout.addLayout(grid)
+        # --- Device Selection UI ---
+        # ... (This part remains the same)
+        group_label = QLabel("Device Selection")
+        group_label.setFont(QFont('Arial', 12, QFont.Weight.Bold))
+        main_layout.addWidget(group_label)
 
-        # --- UI Elements ---
-        grid.addWidget(self._create_group_label('Left Stick'), 0, 0)
-        self.ls_x_label = self._create_value_label('X: 128')
-        self.ls_y_label = self._create_value_label('Y: 128')
-        grid.addWidget(self.ls_x_label, 1, 0)
-        grid.addWidget(self.ls_y_label, 1, 1)
+        gamepad_layout = QHBoxLayout()
+        self.gamepad_select = QComboBox()
+        self.gamepad_refresh_btn = QPushButton("Refresh")
+        gamepad_layout.addWidget(QLabel("Gamepad:"))
+        gamepad_layout.addWidget(self.gamepad_select, 1)
+        gamepad_layout.addWidget(self.gamepad_refresh_btn)
+        main_layout.addLayout(gamepad_layout)
 
-        grid.addWidget(self._create_group_label('Buttons'), 2, 0)
-        self.btn_south_label = self._create_status_label('South (A/X)')
-        self.btn_east_label = self._create_status_label('East (B/O)')
-        grid.addWidget(self.btn_south_label, 3, 0)
-        grid.addWidget(self.btn_east_label, 3, 1)
-
-        grid.addWidget(self._create_group_label('Triggers'), 4, 0)
-        self.l2_trigger_bar = QProgressBar(maximum=255)
-        self.r2_trigger_bar = QProgressBar(maximum=255)
-        grid.addWidget(QLabel("L2"), 5, 0)
-        grid.addWidget(self.l2_trigger_bar, 5, 1)
-        grid.addWidget(QLabel("R2"), 6, 0)
-        grid.addWidget(self.r2_trigger_bar, 6, 1)
-
-        main_layout.addStretch(1)
-
-        # --- Serial Connection UI ---
-        main_layout.addWidget(self._create_group_label('Connection'))
-        conn_layout = QHBoxLayout()
-        self.port_input = QLineEdit("COM3") # Default for Windows
-        self.connect_button = QPushButton("Connect")
-        conn_layout.addWidget(QLabel("Serial Port:"))
-        conn_layout.addWidget(self.port_input)
-        conn_layout.addWidget(self.connect_button)
-        main_layout.addLayout(conn_layout)
-
-    # --- Helper methods for creating widgets ---
-    def _create_group_label(self, text):
-        label = QLabel(text)
-        label.setFont(QFont('Arial', 12, QFont.Weight.Bold))
-        label.setStyleSheet("margin-top: 10px; margin-bottom: 5px;")
-        return label
-
-    def _create_value_label(self, text):
-        label = QLabel(text)
-        label.setFont(QFont('Arial', 10))
-        return label
-
-    def _create_status_label(self, text):
-        label = QLabel(text)
-        label.setFont(QFont('Arial', 10))
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setStyleSheet("border: 1px solid grey; padding: 5px; background-color: lightgrey; border-radius: 5px;")
-        return label
-
-    # --- SLOTS to update the UI based on signals ---
-    def update_stick(self, code, value):
-        if code == 'ABS_X':
-            self.ls_x_label.setText(f"X: {value}")
-        elif code == 'ABS_Y':
-            self.ls_y_label.setText(f"Y: {value}")
-        # Add right stick later if needed
-
-    def update_trigger(self, code, value):
-        if code == 'ABS_Z': # L2
-            self.l2_trigger_bar.setValue(value)
-        elif code == 'ABS_RZ': # R2
-            self.r2_trigger_bar.setValue(value)
-
-    def update_button(self, code, pressed):
-        if code in self.button_labels:
-            label = self.button_labels[code]
-            if pressed:
-                label.setStyleSheet("border: 2px solid blue; padding: 5px; background-color: lightblue; border-radius: 5px;")
-            else:
-                label.setStyleSheet("border: 1px solid grey; padding: 5px; background-color: lightgrey; border-radius: 5px;")
-
-    def update_dpad(self, code, value):
-        # We can add a visual for the DPad later
-        pass
+        serial_layout = QHBoxLayout()
+        self.serial_select = QComboBox()
+        self.serial_refresh_btn = QPushButton("Refresh")
+        self.serial_connect_btn = QPushButton("Connect")
+        serial_layout.addWidget(QLabel("Serial Port:"))
+        serial_layout.addWidget(self.serial_select, 1)
+        serial_layout.addWidget(self.serial_refresh_btn)
+        serial_layout.addWidget(self.serial_connect_btn)
+        main_layout.addLayout(serial_layout)
 
 # Standalone testing block
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     ui = GamepadUI()
-    ui.show()
 
-    # --- Example of how to test the slots ---
-    print("Testing UI slots...")
-    ui.update_stick('ABS_X', 255)
-    ui.update_trigger('ABS_RZ', 150)
-    ui.update_button('BTN_SOUTH', True)
+    # --- Example of how to test the new graphics ---
+    # We now need to call the slots on the gamepad_widget
+    ui.show()
+    ui.gamepad_widget.update_stick('ABS_X', 255)
+    ui.gamepad_widget.update_button('BTN_EAST', True)
 
     sys.exit(app.exec())
