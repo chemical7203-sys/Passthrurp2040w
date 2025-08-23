@@ -1,167 +1,110 @@
 #include <stdio.h>
+#include <stdint.h>
 #include "pico/stdlib.h"
-#include "hardware/i2c.h"
-#include "hardware/dma.h"
-#include "hardware/pio.h"
-#include "hardware/interp.h"
-#include "hardware/timer.h"
-#include "hardware/clocks.h"
-#include "pico/cyw43_arch.h"
 #include "hardware/uart.h"
 
-// I2C defines
-// This example will use I2C0 on GPIO8 (SDA) and GPIO9 (SCL) running at 400KHz.
-// Pins can be changed, see the GPIO function select table in the datasheet for information on GPIO assignments
-#define I2C_PORT i2c0
-#define I2C_SDA 8
-#define I2C_SCL 9
+/*
+ * =================================================================================
+ * Communication Protocol v1
+ * =================================================================================
+ * A simple 5-byte packet sent from PC to Pico over UART.
+ *
+ * - Byte 0: Header (0xA5)
+ * - Byte 1: Button State (uint8_t)
+ *   - Bit 0: Button 1 state (1 for pressed, 0 for released)
+ *   - Bits 1-7: Reserved for future use
+ * - Byte 2: Joystick X (int8_t, -127 to 127)
+ * - Byte 3: Joystick Y (int8_t, -127 to 127)
+ * - Byte 4: Checksum (uint8_t)
+ *   - Calculated as: (Byte 0 ^ Byte 1 ^ Byte 2 ^ Byte 3)
+ * =================================================================================
+ */
+#define PROTOCOL_HEADER 0xA5
+#define PACKET_SIZE 5
 
-// Data will be copied from src to dst
-const char src[] = "Hello, world! (from DMA)";
-char dst[count_of(src)];
-
-#include "blink.pio.h"
-
-void blink_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint freq) {
-    blink_program_init(pio, sm, offset, pin);
-    pio_sm_set_enabled(pio, sm, true);
-
-    printf("Blinking pin %d at %d Hz\n", pin, freq);
-
-    // PIO counter program takes 3 more cycles in total than we pass as
-    // input (wait for n + 1; mov; jmp)
-    pio->txf[sm] = (125000000 / (2 * freq)) - 3;
-}
-
-
-int64_t alarm_callback(alarm_id_t id, void *user_data) {
-    // Put your timeout handler code in here
-    return 0;
-}
+// Struct to hold the received controller data
+typedef struct {
+    uint8_t button_state;
+    int8_t joy_x;
+    int8_t joy_y;
+} controller_data_t;
 
 
-
-// UART defines
-// By default the stdout UART is `uart0`, so we will use the second one
+// Use UART1 for communication, pins 4 and 5
 #define UART_ID uart1
 #define BAUD_RATE 115200
-
-// Use pins 4 and 5 for UART1
-// Pins can be changed, see the GPIO function select table in the datasheet for information on GPIO assignments
 #define UART_TX_PIN 4
 #define UART_RX_PIN 5
 
+// Function to set up UART
+void setup_uart() {
+    uart_init(UART_ID, BAUD_RATE);
+    gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
+    gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
+    printf("UART Initialized\n");
+}
 
+// This function will be called repeatedly in the main loop
+void process_uart() {
+    static uint8_t packet_buffer[PACKET_SIZE];
+    static uint8_t buffer_idx = 0;
+
+    // Process all available bytes from UART
+    while (uart_is_readable(UART_ID)) {
+        uint8_t ch = uart_getc(UART_ID);
+
+        // The first byte of a packet must be the header.
+        // If we're not at the start of a packet, we wait for a header byte.
+        if (buffer_idx == 0) {
+            if (ch == PROTOCOL_HEADER) {
+                packet_buffer[buffer_idx++] = ch;
+            }
+        } else {
+            // We are already building a packet, so store the next byte.
+            packet_buffer[buffer_idx++] = ch;
+
+            // If the packet is complete (all bytes received)
+            if (buffer_idx >= PACKET_SIZE) {
+                // Calculate checksum from the first 4 bytes
+                uint8_t calculated_checksum = packet_buffer[0] ^ packet_buffer[1] ^ packet_buffer[2] ^ packet_buffer[3];
+                uint8_t received_checksum = packet_buffer[4];
+
+                // Validate checksum
+                if (calculated_checksum == received_checksum) {
+                    // Checksum is valid, parse the data
+                    controller_data_t data;
+                    data.button_state = packet_buffer[1];
+                    data.joy_x = (int8_t)packet_buffer[2];
+                    data.joy_y = (int8_t)packet_buffer[3];
+
+                    // Print parsed data for debugging
+                    printf("OK: Buttons=0x%02X, X=%d, Y=%d\n",
+                           data.button_state, data.joy_x, data.joy_y);
+                } else {
+                    // Checksum failed
+                    printf("Error: Checksum failed!\n");
+                }
+
+                // Reset buffer index to wait for the next packet header
+                buffer_idx = 0;
+            }
+        }
+    }
+}
 
 int main()
 {
+    // Initialize stdio for debugging output over USB
     stdio_init_all();
-
-    // Initialise the Wi-Fi chip
-    if (cyw43_arch_init()) {
-        printf("Wi-Fi init failed\n");
-        return -1;
-    }
-
-    // I2C Initialisation. Using it at 400Khz.
-    i2c_init(I2C_PORT, 400*1000);
     
-    gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
-    gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
-    gpio_pull_up(I2C_SDA);
-    gpio_pull_up(I2C_SCL);
-    // For more examples of I2C use see https://github.com/raspberrypi/pico-examples/tree/master/i2c
+    // Setup UART for communication with PC
+    setup_uart();
 
-    // Get a free channel, panic() if there are none
-    int chan = dma_claim_unused_channel(true);
-    
-    // 8 bit transfers. Both read and write address increment after each
-    // transfer (each pointing to a location in src or dst respectively).
-    // No DREQ is selected, so the DMA transfers as fast as it can.
-    
-    dma_channel_config c = dma_channel_get_default_config(chan);
-    channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
-    channel_config_set_read_increment(&c, true);
-    channel_config_set_write_increment(&c, true);
-    
-    dma_channel_configure(
-        chan,          // Channel to be configured
-        &c,            // The configuration we just created
-        dst,           // The initial write address
-        src,           // The initial read address
-        count_of(src), // Number of transfers; in this case each is 1 byte.
-        true           // Start immediately.
-    );
-    
-    // We could choose to go and do something else whilst the DMA is doing its
-    // thing. In this case the processor has nothing else to do, so we just
-    // wait for the DMA to finish.
-    dma_channel_wait_for_finish_blocking(chan);
-    
-    // The DMA has now copied our text from the transmit buffer (src) to the
-    // receive buffer (dst), so we can print it out from there.
-    puts(dst);
-
-    // PIO Blinking example
-    PIO pio = pio0;
-    uint offset = pio_add_program(pio, &blink_program);
-    printf("Loaded program at %d\n", offset);
-    
-    #ifdef PICO_DEFAULT_LED_PIN
-    blink_pin_forever(pio, 0, offset, PICO_DEFAULT_LED_PIN, 3);
-    #else
-    blink_pin_forever(pio, 0, offset, 6, 3);
-    #endif
-    // For more pio examples see https://github.com/raspberrypi/pico-examples/tree/master/pio
-
-    // Interpolator example code
-    interp_config cfg = interp_default_config();
-    // Now use the various interpolator library functions for your use case
-    // e.g. interp_config_clamp(&cfg, true);
-    //      interp_config_shift(&cfg, 2);
-    // Then set the config 
-    interp_set_config(interp0, 0, &cfg);
-    // For examples of interpolator use see https://github.com/raspberrypi/pico-examples/tree/master/interp
-
-    // Timer example code - This example fires off the callback after 2000ms
-    add_alarm_in_ms(2000, alarm_callback, NULL, false);
-    // For more examples of timer use see https://github.com/raspberrypi/pico-examples/tree/master/timer
-
-    printf("System Clock Frequency is %d Hz\n", clock_get_hz(clk_sys));
-    printf("USB Clock Frequency is %d Hz\n", clock_get_hz(clk_usb));
-    // For more examples of clocks use see https://github.com/raspberrypi/pico-examples/tree/master/clocks
-
-    // Enable wifi station
-    cyw43_arch_enable_sta_mode();
-
-    printf("Connecting to Wi-Fi...\n");
-    if (cyw43_arch_wifi_connect_timeout_ms("Your Wi-Fi SSID", "Your Wi-Fi Password", CYW43_AUTH_WPA2_AES_PSK, 30000)) {
-        printf("failed to connect.\n");
-        return 1;
-    } else {
-        printf("Connected.\n");
-        // Read the ip address in a human readable way
-        uint8_t *ip_address = (uint8_t*)&(cyw43_state.netif[0].ip_addr.addr);
-        printf("IP address %d.%d.%d.%d\n", ip_address[0], ip_address[1], ip_address[2], ip_address[3]);
-    }
-
-    // Set up our UART
-    uart_init(UART_ID, BAUD_RATE);
-    // Set the TX and RX pins by using the function select on the GPIO
-    // Set datasheet for more information on function select
-    gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
-    gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
-    
-    // Use some the various UART functions to send out data
-    // In a default system, printf will also output via the default UART
-    
-    // Send out a string, with CR/LF conversions
-    uart_puts(UART_ID, " Hello, UART!\n");
-    
-    // For more examples of UART use see https://github.com/raspberrypi/pico-examples/tree/master/uart
-
+    // Main loop
     while (true) {
-        printf("Hello, world!\n");
-        sleep_ms(1000);
+        // Continuously process incoming UART data
+        process_uart();
     }
+
+    return 0; // Should not be reached
 }
