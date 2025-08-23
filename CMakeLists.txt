@@ -64,6 +64,14 @@ target_include_directories(RP PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
 )
 
+# Manually add TinyUSB source directory to includes since pico_stdio_usb is disabled
+# Note: This relies on PICO_SDK_PATH being set correctly in the environment.
+if (PICO_SDK_PATH)
+    target_include_directories(RP PRIVATE
+            ${PICO_SDK_PATH}/lib/tinyusb/src
+    )
+endif()
+
 # Add any user requested libraries
 target_link_libraries(RP 
         hardware_i2c
