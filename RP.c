@@ -6,6 +6,13 @@
 #include "bsp/board.h"
 #include "usb_descriptors.h"
 
+// For debugging build issues
+#ifndef CFG_TUD_HID
+#error "CFG_TUD_HID is not defined at all!"
+#elif CFG_TUD_HID == 0
+#error "CFG_TUD_HID is defined as 0"
+#endif
+
 /*
  * =================================================================================
  * Communication Protocol v1
