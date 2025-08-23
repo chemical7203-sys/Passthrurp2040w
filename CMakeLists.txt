@@ -35,7 +35,7 @@ pico_sdk_init()
 
 # Add TinyUSB as a subdirectory to ensure it is built and linked correctly
 if (PICO_SDK_PATH)
-    add_subdirectory(${PICO_SDK_PATH}/lib/tinyusb tinyusb_build)
+    add_subdirectory(${PICO_SDK_PATH}/lib/tinyusb/src tinyusb_build)
 endif()
 
 # Add executable. Default name is the project name, version 0.1
