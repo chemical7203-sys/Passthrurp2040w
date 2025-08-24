@@ -34,7 +34,7 @@ uint8_t const desc_hid_report[] =
     HID_USAGE      ( HID_USAGE_DESKTOP_GAMEPAD  ),
     HID_COLLECTION ( HID_COLLECTION_APPLICATION ),
         // Report ID
-        HID_REPORT_ID(1),
+        HID_REPORT_ID(1)
         // 16 Buttons
         HID_USAGE_PAGE ( HID_USAGE_PAGE_BUTTON ),
         HID_USAGE_MIN    ( 1  ),
