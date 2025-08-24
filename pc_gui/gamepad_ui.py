@@ -9,8 +9,8 @@ from PyQt6.QtCore import Qt, QObject, pyqtSignal, QRectF
 
 # --- Signals ---
 class GamepadSignals(QObject):
-    stick_event = pyqtSignal(str, int)
-    trigger_event = pyqtSignal(str, int)
+    stick_event = pyqtSignal(str, float) # Changed to float for -1.0 to 1.0
+    trigger_event = pyqtSignal(str, float) # Changed to float
     button_event = pyqtSignal(str, bool)
     dpad_event = pyqtSignal(str, int)
     gamepad_disconnected = pyqtSignal()
@@ -33,24 +33,24 @@ class GamepadWidget(QGraphicsView):
         self.btn_on_color = QColor("#3399ff")
 
         self.scene.setBackgroundBrush(self.bg_color)
+
+        # State for stick position
+        self.stick_x_val = 0.0
+        self.stick_y_val = 0.0
+
         self._draw_layout()
 
     def _draw_layout(self):
-        # Gamepad Body
         self.scene.addRect(0, 25, 400, 150, QPen(self.body_color), QBrush(self.body_color))
-
-        # Stick Backgrounds
         self.scene.addEllipse(50, 50, 80, 80, QPen(self.stick_bg_color), QBrush(self.stick_bg_color))
 
-        # Movable Stick Item (origin at center of its background)
         self.left_stick = QGraphicsEllipseItem(-15, -15, 30, 30)
         self.left_stick.setBrush(QBrush(self.stick_color))
-        self.left_stick.setPos(90, 90) # Start at center (50 + 80/2, 50 + 80/2)
+        self.left_stick.setPos(90, 90)
         self.scene.addItem(self.left_stick)
 
-        # Button Items
-        self.btn_south = self._create_button_item(280, 95) # 'A'
-        self.btn_east = self._create_button_item(315, 65)  # 'B'
+        self.btn_south = self._create_button_item(280, 95)
+        self.btn_east = self._create_button_item(315, 65)
 
     def _create_button_item(self, x, y):
         item = QGraphicsEllipseItem(-10, -10, 20, 20)
@@ -61,14 +61,17 @@ class GamepadWidget(QGraphicsView):
 
     # --- SLOTS for updating graphics ---
     def update_stick(self, code, value):
-        # Map 0-255 value to a position offset
-        offset = (value - 128) / 128.0 * 30 # Max offset of 30 pixels
+        # value is a float from -1.0 to 1.0
         if code == 'ABS_X':
-            current_y = self.left_stick.y()
-            self.left_stick.setPos(90 + offset, current_y)
+            self.stick_x_val = value
         elif code == 'ABS_Y':
-            current_x = self.left_stick.x()
-            self.left_stick.setPos(current_x, 90 + offset)
+            self.stick_y_val = value
+
+        # Calculate position based on state
+        # Max offset of 30 pixels from center (90, 90)
+        new_x = 90 + (self.stick_x_val * 30)
+        new_y = 90 + (self.stick_y_val * 30)
+        self.left_stick.setPos(new_x, new_y)
 
     def update_button(self, code, pressed):
         item = None
@@ -92,12 +95,9 @@ class GamepadUI(QWidget):
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
-        # Add the new graphics widget
         self.gamepad_widget = GamepadWidget()
         main_layout.addWidget(self.gamepad_widget, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        # --- Device Selection UI ---
-        # ... (This part remains the same)
         group_label = QLabel("Device Selection")
         group_label.setFont(QFont('Arial', 12, QFont.Weight.Bold))
         main_layout.addWidget(group_label)
@@ -120,15 +120,8 @@ class GamepadUI(QWidget):
         serial_layout.addWidget(self.serial_connect_btn)
         main_layout.addLayout(serial_layout)
 
-# Standalone testing block
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     ui = GamepadUI()
-
-    # --- Example of how to test the new graphics ---
-    # We now need to call the slots on the gamepad_widget
     ui.show()
-    ui.gamepad_widget.update_stick('ABS_X', 255)
-    ui.gamepad_widget.update_button('BTN_EAST', True)
-
     sys.exit(app.exec())

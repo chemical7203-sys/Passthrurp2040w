@@ -67,13 +67,14 @@ class DS4Handler(threading.Thread):
             # Axis 0: Left Stick X, Axis 1: Left Stick Y
             # Axis 2: L2 Trigger, Axis 3: Right Stick X, Axis 4: Right Stick Y, Axis 5: R2 Trigger
             # Pygame axes are -1.0 to 1.0. Triggers are -1.0 (released) to 1.0 (pressed).
-            # We need to convert them to our 0-255 range.
-            value = int((event.value + 1) / 2 * 255) # Scale -1..1 to 0..255
+            # Emit the raw float value (-1.0 to 1.0)
+            if event.axis == 0: self.signals.stick_event.emit('ABS_X', event.value)
+            elif event.axis == 1: self.signals.stick_event.emit('ABS_Y', event.value)
 
-            if event.axis == 0: self.signals.stick_event.emit('ABS_X', value)
-            elif event.axis == 1: self.signals.stick_event.emit('ABS_Y', value)
-            elif event.axis == 2: self.signals.trigger_event.emit('ABS_Z', value) # L2
-            elif event.axis == 5: self.signals.trigger_event.emit('ABS_RZ', value) # R2
+            # Triggers are also axes. Let's emit them as floats too.
+            # They are -1.0 (released) to 1.0 (fully pressed)
+            elif event.axis == 2: self.signals.trigger_event.emit('ABS_Z', event.value) # L2
+            elif event.axis == 5: self.signals.trigger_event.emit('ABS_RZ', event.value) # R2
 
         elif event.type == pygame.JOYBUTTONDOWN or event.type == pygame.JOYBUTTONUP:
             pressed = (event.type == pygame.JOYBUTTONDOWN)

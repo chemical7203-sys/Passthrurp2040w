@@ -82,7 +82,7 @@ class MainApplication:
         if event_code == 'BTN_SOUTH':
             self.last_serial_state['buttons'] = 1 if event_value else 0
         elif event_code == 'ABS_X':
-            # Pygame axis is -1.0 to 1.0. Convert to -127 to 127
+            # event_value is a float from -1.0 to 1.0. Convert to -127 to 127.
             self.last_serial_state['x'] = int(event_value * 127)
         elif event_code == 'ABS_Y':
             self.last_serial_state['y'] = int(event_value * 127)
