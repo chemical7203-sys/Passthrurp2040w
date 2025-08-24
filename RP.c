@@ -69,8 +69,7 @@ void process_uart() {
                 uint8_t checksum = 0;
                 for (int i = 0; i < PROTOCOL_V2_SIZE - 1; i++) checksum ^= packet_buffer[i];
                 if (checksum == packet_buffer[PROTOCOL_V2_SIZE - 1]) {
-                    // Checksum OK, parse the packet into the global state manually
-                    // to avoid any potential struct padding/alignment issues.
+                    // Checksum OK, parse the packet into the global state
                     gamepad_data.buttons = (uint16_t)packet_buffer[1] | ((uint16_t)packet_buffer[2] << 8);
                     gamepad_data.lx      = (int8_t)packet_buffer[3];
                     gamepad_data.ly      = (int8_t)packet_buffer[4];
@@ -79,6 +78,14 @@ void process_uart() {
                     gamepad_data.l2      = packet_buffer[7];
                     gamepad_data.r2      = packet_buffer[8];
                     gamepad_data.dpad    = packet_buffer[9];
+
+                    // Send parsed data back for debugging
+                    char debug_buf[128];
+                    sprintf(debug_buf, "Rcvd: B:%04x LX:%d LY:%d RX:%d RY:%d L2:%u R2:%u D:%u\r\n",
+                        gamepad_data.buttons, gamepad_data.lx, gamepad_data.ly,
+                        gamepad_data.rx, gamepad_data.ry, gamepad_data.l2,
+                        gamepad_data.r2, gamepad_data.dpad);
+                    uart_puts(UART_ID, debug_buf);
                 }
                 buffer_idx = 0;
             }

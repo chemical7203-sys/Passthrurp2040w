@@ -42,6 +42,9 @@ class MainApplication:
         self.gamepad_signals.gamepad_disconnected.connect(self.handle_gamepad_disconnect)
         self.gamepad_signals.raw_event.connect(self.ui.log_raw_event)
 
+        # Connect serial RX signal to the UI log
+        self.serial_handler.signals.received_line.connect(self.ui.log_uart_rx)
+
         # Connect all events to update the serial state
         self.gamepad_signals.stick_event.connect(self.update_serial_state)
         self.gamepad_signals.button_event.connect(self.update_serial_state)
