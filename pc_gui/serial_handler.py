@@ -1,19 +1,11 @@
 import serial
 import struct
 import time
-import threading
-from PyQt6.QtCore import QObject, pyqtSignal
-
-class SerialSignals(QObject):
-    received_line = pyqtSignal(str)
 
 class SerialHandler:
     def __init__(self):
         self.ser = None
         self.port = None
-        self.signals = SerialSignals()
-        self._running = False
-        self.read_thread = None
 
     def connect(self, port, baudrate=115200):
         if self.ser and self.ser.is_open:
@@ -21,9 +13,8 @@ class SerialHandler:
             self.disconnect()
         try:
             self.port = port
-            self.ser = serial.Serial(self.port, baudrate, timeout=1)
+            self.ser = serial.Serial(self.port, baudrate, timeout=0.05) # Non-blocking
             print(f"Successfully connected to {self.port}")
-            self._start_reading()
             return True
         except serial.SerialException as e:
             print(f"Error connecting to {self.port}: {e}")
@@ -31,36 +22,20 @@ class SerialHandler:
             return False
 
     def disconnect(self):
-        self._stop_reading()
         if self.ser and self.ser.is_open:
             self.ser.close()
             print(f"Disconnected from {self.port}")
         self.ser = None; self.port = None
 
-    def _start_reading(self):
-        self._running = True
-        self.read_thread = threading.Thread(target=self._read_loop)
-        self.read_thread.daemon = True
-        self.read_thread.start()
-
-    def _stop_reading(self):
-        self._running = False
-        if self.read_thread and self.read_thread.is_alive():
-            self.read_thread.join()
-
-    def _read_loop(self):
-        while self._running and self.ser and self.ser.is_open:
-            try:
-                if self.ser.in_waiting > 0:
-                    line = self.ser.readline().decode('utf-8').strip()
-                    if line:
-                        self.signals.received_line.emit(line)
-            except serial.SerialException:
-                print("Serial port disconnected during read.")
-                break
-            except Exception as e:
-                print(f"Error in read loop: {e}")
-            time.sleep(0.01)
+    def read_line(self):
+        """Reads a line from the serial port if available."""
+        if not self.ser or not self.ser.is_open or self.ser.in_waiting == 0:
+            return None
+        try:
+            line = self.ser.readline().decode('utf-8').strip()
+            return line
+        except Exception:
+            return None
 
     def _create_packet_v2(self, state):
         buttons = state.get('buttons', 0); dpad = state.get('dpad', 0)

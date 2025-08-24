@@ -58,8 +58,16 @@ void process_uart() {
                 uint8_t checksum = 0;
                 for (int i = 0; i < PROTOCOL_V2_SIZE - 1; i++) checksum ^= packet_buffer[i];
                 if (checksum == packet_buffer[PROTOCOL_V2_SIZE - 1]) {
-                    // Checksum OK, parse into the global state
-                    memcpy(&gamepad_data, &packet_buffer[1], sizeof(gamepad_data_v2_t));
+                    // Checksum OK, parse the packet into the global state manually
+                    gamepad_data.buttons = (uint16_t)packet_buffer[1] | ((uint16_t)packet_buffer[2] << 8);
+                    gamepad_data.lx      = (int8_t)packet_buffer[3];
+                    gamepad_data.ly      = (int8_t)packet_buffer[4];
+                    gamepad_data.rx      = (int8_t)packet_buffer[5];
+                    gamepad_data.ry      = (int8_t)packet_buffer[6];
+                    gamepad_data.l2      = packet_buffer[7];
+                    gamepad_data.r2      = packet_buffer[8];
+                    gamepad_data.dpad    = packet_buffer[9];
+
                     // Send parsed data back for debugging
                     char debug_buf[128];
                     sprintf(debug_buf, "Rcvd: B:%04x LX:%d LY:%d RX:%d RY:%d L2:%u R2:%u D:%u\r\n",
