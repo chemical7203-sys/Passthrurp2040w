@@ -7,9 +7,8 @@ class SerialHandler:
     def __init__(self):
         self.ser = None
         self.port = None
-        self.read_thread = None
-        self.on_data_received = None
-        self._running = False
+        # The read thread is no longer needed, main.py will poll.
+        # This simplifies the logic and avoids cross-thread signaling issues.
 
     def connect(self, port, baudrate=115200):
         if self.ser and self.ser.is_open:
@@ -17,9 +16,9 @@ class SerialHandler:
             self.disconnect()
         try:
             self.port = port
-            self.ser = serial.Serial(self.port, baudrate, timeout=1)
+            # Use a short timeout for non-blocking reads
+            self.ser = serial.Serial(self.port, baudrate, timeout=0.01)
             print(f"Successfully connected to {self.port}")
-            self._start_reading()
             return True
         except serial.SerialException as e:
             print(f"Error connecting to {self.port}: {e}")
@@ -27,36 +26,21 @@ class SerialHandler:
             return False
 
     def disconnect(self):
-        self._stop_reading()
         if self.ser and self.ser.is_open:
             self.ser.close()
             print(f"Disconnected from {self.port}")
         self.ser = None; self.port = None
 
-    def _start_reading(self):
-        if self.read_thread is None:
-            self._running = True
-            self.read_thread = threading.Thread(target=self._read_loop)
-            self.read_thread.daemon = True
-            self.read_thread.start()
-
-    def _stop_reading(self):
-        self._running = False
-        if self.read_thread and self.read_thread.is_alive():
-            self.read_thread.join()
-        self.read_thread = None
-
-    def _read_loop(self):
-        while self._running and self.ser and self.ser.is_open:
-            try:
-                if self.ser.in_waiting > 0:
-                    line = self.ser.readline().decode('utf-8').strip()
-                    if line and self.on_data_received:
-                        self.on_data_received(line)
-            except serial.SerialException:
-                print("Serial port disconnected during read.")
-                break
-            time.sleep(0.01)
+    def read_line(self):
+        """Reads a line from the serial port if available. Returns None otherwise."""
+        if not self.ser or not self.ser.is_open or self.ser.in_waiting == 0:
+            return None
+        try:
+            # readline() will use the timeout set in connect()
+            line = self.ser.readline().decode('utf-8').strip()
+            return line if line else None
+        except Exception:
+            return None
 
     def _create_packet_v2(self, state):
         buttons = state.get('buttons', 0); dpad = state.get('dpad', 0)

@@ -10,7 +10,7 @@ class MainApplication:
     def __init__(self):
         self.app = QApplication(sys.argv)
         self.ui = GamepadUI()
-        self.gamepad_signals = GamepadSignals()
+        self.gamepad_signals = GamepadSignals() # The one and only signals object
         self.ds4_handler = DS4Handler(self.gamepad_signals)
         self.serial_handler = SerialHandler()
 
@@ -47,16 +47,20 @@ class MainApplication:
         self.ui.gamepad_refresh_btn.clicked.connect(self.refresh_gamepads)
         self.ui.gamepad_select.currentIndexChanged.connect(self.select_gamepad)
 
-        self.ui.gamepad_signals.stick_event.connect(self.ui.gamepad_widget.update_stick)
-        self.ui.gamepad_signals.button_event.connect(self.ui.gamepad_widget.update_button)
-        self.ui.gamepad_signals.trigger_event.connect(self.ui.gamepad_widget.update_trigger)
-        self.ui.gamepad_signals.gamepad_disconnected.connect(self.handle_gamepad_disconnect)
-        self.ui.gamepad_signals.raw_event.connect(self.ui.log_raw_event)
-        self.serial_handler.signals.received_line.connect(self.ui.log_uart_rx)
+        # Corrected signal connections
+        self.gamepad_signals.stick_event.connect(self.ui.gamepad_widget.update_stick)
+        self.gamepad_signals.button_event.connect(self.ui.gamepad_widget.update_button)
+        self.gamepad_signals.trigger_event.connect(self.ui.gamepad_widget.update_trigger)
+        self.gamepad_signals.gamepad_disconnected.connect(self.handle_gamepad_disconnect)
+        self.gamepad_signals.raw_event.connect(self.ui.log_raw_event)
 
+        # Connect to serial state updater
         self.gamepad_signals.stick_event.connect(self.update_serial_state)
         self.gamepad_signals.button_event.connect(self.update_serial_state)
         self.gamepad_signals.trigger_event.connect(self.update_serial_state)
+
+        # Connect serial RX to UI
+        self.serial_handler.on_data_received = self.ui.log_uart_rx
 
     def read_serial_data(self):
         line = self.serial_handler.read_line()
@@ -89,7 +93,8 @@ class MainApplication:
             self.serial_handler.disconnect(); self.ui.serial_connect_btn.setText("Connect")
         else:
             port = self.ui.serial_select.currentData()
-            if port and self.serial_handler.connect(port): self.ui.serial_connect_btn.setText("Disconnect")
+            if port and self.serial_handler.connect(port):
+                self.ui.serial_connect_btn.setText("Disconnect")
             elif port: QMessageBox.critical(self.ui, "Connection Error", f"Failed to connect to {port}.")
 
     def update_serial_state(self, code, value):
