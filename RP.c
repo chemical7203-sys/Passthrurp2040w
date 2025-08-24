@@ -26,11 +26,32 @@ static gamepad_data_v2_t gamepad_data;
 #define UART_TX_PIN 4
 #define UART_RX_PIN 5
 
-void setup_uart() { /* ... UART setup ... */ }
-void process_uart() { /* ... UART processing ... */ }
-// For brevity, keeping these functions as they were, they are correct.
-void setup_uart() { uart_init(UART_ID, BAUD_RATE); gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART); gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART); }
-void process_uart() { static uint8_t pb[11]; static uint8_t idx=0; while(uart_is_readable(UART_ID)){ uint8_t ch=uart_getc(UART_ID); if(idx==0){if(ch==0xA6)pb[idx++]=ch;}else{pb[idx++]=ch; if(idx>=11){uint8_t cs=0;for(int i=0;i<10;i++)cs^=pb[i]; if(cs==pb[10]){memcpy(&gamepad_data,&pb[1],sizeof(gamepad_data));}idx=0;}}}}
+void setup_uart() {
+    uart_init(UART_ID, BAUD_RATE);
+    gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
+    gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
+}
+
+void process_uart() {
+    static uint8_t packet_buffer[PROTOCOL_V2_SIZE];
+    static uint8_t buffer_idx = 0;
+    while (uart_is_readable(UART_ID)) {
+        uint8_t ch = uart_getc(UART_ID);
+        if (buffer_idx == 0) {
+            if (ch == PROTOCOL_V2_HEADER) packet_buffer[buffer_idx++] = ch;
+        } else {
+            packet_buffer[buffer_idx++] = ch;
+            if (buffer_idx >= PROTOCOL_V2_SIZE) {
+                uint8_t checksum = 0;
+                for (int i = 0; i < PROTOCOL_V2_SIZE - 1; i++) checksum ^= packet_buffer[i];
+                if (checksum == packet_buffer[PROTOCOL_V2_SIZE - 1]) {
+                    memcpy(&gamepad_data, &packet_buffer[1], sizeof(gamepad_data));
+                }
+                buffer_idx = 0;
+            }
+        }
+    }
+}
 
 // --- HID Task and Callbacks ---
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen) { return 0; }
@@ -51,20 +72,17 @@ void hid_task(void) {
   if ( tud_suspended() ) tud_remote_wakeup();
 
   if ( tud_hid_ready() ) {
-    // 9-byte report: 2 for buttons, 1 for hat, 6 for axes
     uint8_t report_payload[9] = {0};
 
-    // Correctly ordered payload based on the new descriptor
     report_payload[0] = gamepad_data.buttons & 0xFF;
     report_payload[1] = (gamepad_data.buttons >> 8) & 0xFF;
     report_payload[2] = dpad_to_hat(gamepad_data.dpad);
-    // Map sticks (-127 to 127) to 0-255 range
-    report_payload[3] = gamepad_data.lx + 128; // X
-    report_payload[4] = gamepad_data.ly + 128; // Y
-    report_payload[5] = gamepad_data.l2;       // Z
-    report_payload[6] = gamepad_data.r2;       // Rz
-    report_payload[7] = gamepad_data.rx + 128; // Rx
-    report_payload[8] = gamepad_data.ry + 128; // Ry
+    report_payload[3] = gamepad_data.lx + 128;
+    report_payload[4] = gamepad_data.ly + 128;
+    report_payload[5] = gamepad_data.l2;
+    report_payload[6] = gamepad_data.r2;
+    report_payload[7] = gamepad_data.rx + 128;
+    report_payload[8] = gamepad_data.ry + 128;
     
     tud_hid_report(1, report_payload, sizeof(report_payload));
   }
@@ -75,6 +93,7 @@ int main() {
     board_init();
     setup_uart();
     tusb_init();
+
     while (true) {
         tud_task();
         hid_task();
