@@ -30,48 +30,54 @@ uint8_t const * tud_descriptor_device_cb(void) {
 //--------------------------------------------------------------------+
 uint8_t const desc_hid_report[] =
 {
-  TUD_HID_REPORT_DESC_GAMEPAD(
-    HID_REPORT_ID(1),
-    // 4 axes (LX, LY, RX, RY)
-    HID_USAGE_PAGE(HID_USAGE_PAGE_DESKTOP),
-    HID_USAGE(HID_USAGE_DESKTOP_X),
-    HID_USAGE(HID_USAGE_DESKTOP_Y),
-    HID_USAGE(HID_USAGE_DESKTOP_RX),
-    HID_USAGE(HID_USAGE_DESKTOP_RY),
-    HID_LOGICAL_MIN_N ( -127, 2 ),
-    HID_LOGICAL_MAX_N ( 127, 2 ),
-    HID_REPORT_SIZE( 8 ),
-    HID_REPORT_COUNT( 4 ),
-    HID_INPUT( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ),
-    // 2 trigger axes (L2, R2)
-    HID_USAGE_PAGE(HID_USAGE_PAGE_DESKTOP),
-    HID_USAGE(HID_USAGE_DESKTOP_Z),
-    HID_USAGE(HID_USAGE_DESKTOP_RZ),
-    HID_LOGICAL_MIN_N ( 0, 2 ),
-    HID_LOGICAL_MAX_N ( 255, 2 ),
-    HID_REPORT_SIZE( 8 ),
-    HID_REPORT_COUNT( 2 ),
-    HID_INPUT( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ),
-    // D-Pad
-    HID_USAGE_PAGE(HID_USAGE_PAGE_DESKTOP),
-    HID_USAGE(HID_USAGE_DESKTOP_HAT_SWITCH),
-    HID_LOGICAL_MIN ( 1 ),
-    HID_LOGICAL_MAX ( 8 ),
-    HID_PHYSICAL_MIN( 0 ),
-    HID_PHYSICAL_MAX_N( 315, 2 ),
-    HID_REPORT_SIZE ( 4 ),
-    HID_REPORT_COUNT( 1 ),
-    HID_INPUT( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ),
-    // 16 Buttons
-    HID_USAGE_PAGE(HID_USAGE_PAGE_BUTTON),
-    HID_USAGE_MIN( 1 ),
-    HID_USAGE_MAX( 16 ),
-    HID_LOGICAL_MIN( 0 ),
-    HID_LOGICAL_MAX( 1 ),
-    HID_REPORT_SIZE( 1 ),
-    HID_REPORT_COUNT( 16 ),
-    HID_INPUT( HID_DATA | HID_VARIABLE | HID_ABSOLUTE )
-  )
+    HID_USAGE_PAGE ( HID_USAGE_PAGE_DESKTOP     ),
+    HID_USAGE      ( HID_USAGE_DESKTOP_GAMEPAD  ),
+    HID_COLLECTION ( HID_COLLECTION_APPLICATION ),
+        // Report ID
+        HID_REPORT_ID(1),
+        // 16 Buttons
+        HID_USAGE_PAGE ( HID_USAGE_PAGE_BUTTON ),
+        HID_USAGE_MIN    ( 1  ),
+        HID_USAGE_MAX    ( 16 ),
+        HID_LOGICAL_MIN  ( 0  ),
+        HID_LOGICAL_MAX  ( 1  ),
+        HID_REPORT_COUNT ( 16 ),
+        HID_REPORT_SIZE  ( 1  ),
+        HID_INPUT        ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ),
+        // D-Pad (Hat switch)
+        HID_USAGE_PAGE ( HID_USAGE_PAGE_DESKTOP ),
+        HID_USAGE      ( HID_USAGE_DESKTOP_HAT_SWITCH ),
+        HID_LOGICAL_MIN  ( 0 ),
+        HID_LOGICAL_MAX  ( 7 ), // 8 directions
+        HID_PHYSICAL_MIN ( 0 ),
+        HID_PHYSICAL_MAX_N ( 315, 2 ),
+        HID_REPORT_COUNT ( 1 ),
+        HID_REPORT_SIZE  ( 4 ),
+        HID_INPUT        ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ),
+        // Padding for Hat switch to make it a full byte
+        HID_REPORT_COUNT ( 1 ),
+        HID_REPORT_SIZE  ( 4 ),
+        HID_INPUT        ( HID_CONSTANT | HID_VARIABLE | HID_ABSOLUTE ),
+        // 4 Analog Axes (LX, LY, RX, RY)
+        HID_USAGE_PAGE ( HID_USAGE_PAGE_DESKTOP ),
+        HID_USAGE      ( HID_USAGE_DESKTOP_X  ),
+        HID_USAGE      ( HID_USAGE_DESKTOP_Y  ),
+        HID_USAGE      ( HID_USAGE_DESKTOP_RX ),
+        HID_USAGE      ( HID_USAGE_DESKTOP_RY ),
+        HID_LOGICAL_MIN  ( -127 ),
+        HID_LOGICAL_MAX  ( 127 ),
+        HID_REPORT_COUNT ( 4 ),
+        HID_REPORT_SIZE  ( 8 ),
+        HID_INPUT        ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ),
+        // 2 Trigger Axes (L2, R2)
+        HID_USAGE      ( HID_USAGE_DESKTOP_Z ),
+        HID_USAGE      ( HID_USAGE_DESKTOP_RZ ),
+        HID_LOGICAL_MIN  ( 0 ),
+        HID_LOGICAL_MAX  ( 255 ),
+        HID_REPORT_COUNT ( 2 ),
+        HID_REPORT_SIZE  ( 8 ),
+        HID_INPUT        ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ),
+    HID_COLLECTION_END
 };
 
 uint8_t const * tud_hid_descriptor_report_cb(uint8_t instance) {
@@ -103,7 +109,7 @@ char const* string_desc_arr [] =
 {
   (char[]){0x09, 0x04},
   "JulesCorp",
-  "Pico Full Gamepad", // Updated product name
+  "Pico Full Gamepad",
   "123456",
 };
 

@@ -20,11 +20,12 @@ typedef enum {
 } hat_switch_t;
 
 // Struct for the HID report that we send to the host
+// The order of members MUST MATCH the HID report descriptor in usb_descriptors.c
 typedef struct __attribute__((packed)) {
+    uint16_t buttons;    // 16 buttons
+    uint8_t hat;         // D-Pad
     int8_t x, y, rx, ry; // 4 axes
     uint8_t z, rz;       // 2 triggers
-    uint8_t hat;         // D-Pad
-    uint16_t buttons;    // 16 buttons
 } hid_report_t;
 
 // Struct to hold the received v2 controller data
