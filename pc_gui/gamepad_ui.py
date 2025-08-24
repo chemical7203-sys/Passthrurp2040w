@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QGraphicsRectItem, QTextEdit
 )
 from PyQt6.QtGui import QFont, QColor, QBrush, QPen
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QRectF
+from PyQt6.QtCore import Qt, QObject, pyqtSignal
 
 # --- Signals ---
 class GamepadSignals(QObject):
@@ -14,79 +14,106 @@ class GamepadSignals(QObject):
     button_event = pyqtSignal(str, bool)
     dpad_event = pyqtSignal(str, int)
     gamepad_disconnected = pyqtSignal()
-    raw_event = pyqtSignal(str) # For the raw event monitor
+    raw_event = pyqtSignal(str)
 
 # --- Gamepad Graphics Widget ---
 class GamepadWidget(QGraphicsView):
-    """A widget that draws a visual representation of the gamepad."""
     def __init__(self):
         super().__init__()
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
-        self.setFixedSize(400, 200)
+        self.setFixedSize(450, 250)
 
-        # Colors
-        self.bg_color = QColor("#e0e0e0")
-        self.body_color = QColor("#cccccc")
-        self.stick_bg_color = QColor("#bbbbbb")
-        self.stick_color = QColor("#666666")
-        self.btn_off_color = QColor("#aaaaaa")
-        self.btn_on_color = QColor("#3399ff")
-
-        self.scene.setBackgroundBrush(self.bg_color)
-
-        # State for stick position
-        self.stick_x_val = 0.0
-        self.stick_y_val = 0.0
+        self.stick_x_val, self.stick_y_val = 0.0, 0.0
+        self.rstick_x_val, self.rstick_y_val = 0.0, 0.0
 
         self._draw_layout()
 
     def _draw_layout(self):
-        self.scene.addRect(0, 25, 400, 150, QPen(self.body_color), QBrush(self.body_color))
-        self.scene.addEllipse(50, 50, 80, 80, QPen(self.stick_bg_color), QBrush(self.stick_bg_color))
+        # Colors and pens
+        body_brush = QBrush(QColor("#cccccc"))
+        stick_bg_brush = QBrush(QColor("#bbbbbb"))
+        self.stick_brush = QBrush(QColor("#666666"))
+        self.btn_off_brush = QBrush(QColor("#aaaaaa"))
+        self.btn_on_brush = QBrush(QColor("#3399ff"))
+        self.dpad_brush = QBrush(QColor("#888888"))
 
-        self.left_stick = QGraphicsEllipseItem(-15, -15, 30, 30)
-        self.left_stick.setBrush(QBrush(self.stick_color))
-        self.left_stick.setPos(90, 90)
-        self.scene.addItem(self.left_stick)
+        # Body
+        self.scene.addRect(0, 25, 450, 150, QPen(Qt.GlobalColor.transparent), body_brush)
 
-        self.btn_south = self._create_button_item(280, 95)
-        self.btn_east = self._create_button_item(315, 65)
+        # D-Pad
+        self.dpad_up = self.scene.addRect(55, 60, 20, 25, QPen(Qt.GlobalColor.black), self.dpad_brush)
+        self.dpad_down = self.scene.addRect(55, 115, 20, 25, QPen(Qt.GlobalColor.black), self.dpad_brush)
+        self.dpad_left = self.scene.addRect(30, 85, 25, 20, QPen(Qt.GlobalColor.black), self.dpad_brush)
+        self.dpad_right = self.scene.addRect(75, 85, 25, 20, QPen(Qt.GlobalColor.black), self.dpad_brush)
+
+        # Sticks
+        self.scene.addEllipse(120, 90, 80, 80, QPen(Qt.GlobalColor.transparent), stick_bg_brush)
+        self.left_stick = self._create_stick_item(160, 130)
+
+        self.scene.addEllipse(250, 90, 80, 80, QPen(Qt.GlobalColor.transparent), stick_bg_brush)
+        self.right_stick = self._create_stick_item(290, 130)
+
+        # Buttons
+        self.buttons = {
+            'BTN_WEST': self._create_button_item(350, 95),  # Square
+            'BTN_NORTH': self._create_button_item(380, 65), # Triangle
+            'BTN_EAST': self._create_button_item(410, 95),  # Circle
+            'BTN_SOUTH': self._create_button_item(380, 125), # X
+        }
+
+        # Triggers and Shoulders
+        self.l1_btn = self.scene.addRect(30, 25, 80, 20, QPen(Qt.GlobalColor.black), self.btn_off_brush)
+        self.r1_btn = self.scene.addRect(340, 25, 80, 20, QPen(Qt.GlobalColor.black), self.btn_off_brush)
+        self.l2_label = self.scene.addText("L2: 0", QFont("Arial", 10))
+        self.l2_label.setPos(30, 0)
+        self.r2_label = self.scene.addText("R2: 0", QFont("Arial", 10))
+        self.r2_label.setPos(340, 0)
+        self.buttons.update({'BTN_TL': self.l1_btn, 'BTN_TR': self.r1_btn})
+
+    def _create_stick_item(self, x, y):
+        stick = QGraphicsEllipseItem(-15, -15, 30, 30)
+        stick.setBrush(self.stick_brush)
+        stick.setPos(x, y)
+        self.scene.addItem(stick)
+        return stick
 
     def _create_button_item(self, x, y):
-        item = QGraphicsEllipseItem(-10, -10, 20, 20)
-        item.setBrush(QBrush(self.btn_off_color))
-        item.setPos(x, y)
-        self.scene.addItem(item)
-        return item
+        button = QGraphicsEllipseItem(-10, -10, 20, 20)
+        button.setBrush(self.btn_off_brush)
+        button.setPos(x, y)
+        self.scene.addItem(button)
+        return button
 
-    # --- SLOTS for updating graphics ---
+    # --- SLOTS ---
     def update_stick(self, code, value):
-        # value is a float from -1.0 to 1.0
-        if code == 'ABS_X':
-            self.stick_x_val = value
-        elif code == 'ABS_Y':
-            self.stick_y_val = value
-
-        # Calculate position based on state
-        # Max offset of 30 pixels from center (90, 90)
-        new_x = 90 + (self.stick_x_val * 30)
-        new_y = 90 + (self.stick_y_val * 30)
-        self.left_stick.setPos(new_x, new_y)
+        if code == 'ABS_X': self.stick_x_val = value
+        elif code == 'ABS_Y': self.stick_y_val = value
+        elif code == 'ABS_RX': self.rstick_x_val = value
+        elif code == 'ABS_RY': self.rstick_y_val = value
+        self.left_stick.setPos(160 + (self.stick_x_val * 30), 130 + (self.stick_y_val * 30))
+        self.right_stick.setPos(290 + (self.rstick_x_val * 30), 130 + (self.rstick_y_val * 30))
 
     def update_button(self, code, pressed):
-        item = None
-        if code == 'BTN_SOUTH':
-            item = self.btn_south
-        elif code == 'BTN_EAST':
-            item = self.btn_east
+        if code in self.buttons:
+            self.buttons[code].setBrush(self.btn_on_brush if pressed else self.btn_off_brush)
 
-        if item:
-            item.setBrush(QBrush(self.btn_on_color) if pressed else QBrush(self.btn_off_color))
+    def update_dpad(self, code, value):
+        if code == 'ABS_HAT0X':
+            self.dpad_left.setBrush(self.btn_on_brush if value < 0 else self.dpad_brush)
+            self.dpad_right.setBrush(self.btn_on_brush if value > 0 else self.dpad_brush)
+        elif code == 'ABS_HAT0Y':
+            self.dpad_up.setBrush(self.btn_on_brush if value < 0 else self.dpad_brush)
+            self.dpad_down.setBrush(self.btn_on_brush if value > 0 else self.dpad_brush)
+
+    def update_trigger(self, code, value):
+        # value is -1.0 to 1.0. We want 0-255.
+        val_0_255 = int((value + 1) / 2 * 255)
+        if code == 'ABS_Z': self.l2_label.setPlainText(f"L2: {val_0_255}")
+        elif code == 'ABS_RZ': self.r2_label.setPlainText(f"R2: {val_0_255}")
 
 # --- Main UI Window ---
 class GamepadUI(QWidget):
-    """The main window containing the gamepad display and connection controls."""
     def __init__(self):
         super().__init__()
         self.initUI()
@@ -99,6 +126,8 @@ class GamepadUI(QWidget):
         self.gamepad_widget = GamepadWidget()
         main_layout.addWidget(self.gamepad_widget, alignment=Qt.AlignmentFlag.AlignCenter)
 
+        # Device Selection and Logging UI...
+        # ... (rest of the UI remains the same)
         group_label = QLabel("Device Selection")
         group_label.setFont(QFont('Arial', 12, QFont.Weight.Bold))
         main_layout.addWidget(group_label)
@@ -121,7 +150,6 @@ class GamepadUI(QWidget):
         serial_layout.addWidget(self.serial_connect_btn)
         main_layout.addLayout(serial_layout)
 
-        # --- Raw Event Monitor ---
         main_layout.addWidget(QLabel("Raw Pygame Event Monitor:"))
         self.event_monitor = QTextEdit()
         self.event_monitor.setReadOnly(True)
@@ -129,9 +157,7 @@ class GamepadUI(QWidget):
         main_layout.addWidget(self.event_monitor)
 
     def log_raw_event(self, event_string):
-        """Appends a string to the event monitor."""
         self.event_monitor.append(event_string)
-        # Auto-scroll to the bottom
         self.event_monitor.verticalScrollBar().setValue(self.event_monitor.verticalScrollBar().maximum())
 
 if __name__ == '__main__':
