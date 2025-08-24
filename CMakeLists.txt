@@ -30,6 +30,11 @@ include(pico_sdk_import.cmake)
 
 project(RP C CXX ASM)
 
+# --- Add build-time option for output mode ---
+set(OUTPUT_MODE "GENERIC" CACHE STRING "Gamepad output mode (GENERIC, SWITCH, DS4)")
+set_property(CACHE OUTPUT_MODE PROPERTY STRINGS "GENERIC" "SWITCH" "DS4")
+message(STATUS "Gamepad Output Mode set to: ${OUTPUT_MODE}")
+
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
@@ -42,6 +47,7 @@ add_executable(RP
 # Add compile definition to enable TinyUSB HID class
 target_compile_definitions(RP PRIVATE
     CFG_TUD_HID=1
+    INPUT_MODE_${OUTPUT_MODE}=1
 )
 
 pico_set_program_name(RP "RP")
