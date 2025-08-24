@@ -1,181 +1,138 @@
 #include <stdio.h>
 #include <stdint.h>
 #include "pico/stdlib.h"
+#include "pico/time.h"
 #include "hardware/uart.h"
 #include "tusb.h"
 #include "bsp/board.h"
-#include "usb_descriptors.h"
 
-/*
- * =================================================================================
- * Communication Protocol v1
- * =================================================================================
- * A simple 5-byte packet sent from PC to Pico over UART.
- *
- * - Byte 0: Header (0xA5)
- * - Byte 1: Button State (uint8_t)
- *   - Bit 0: Button 1 state (1 for pressed, 0 for released)
- *   - Bits 1-7: Reserved for future use
- * - Byte 2: Joystick X (int8_t, -127 to 127)
- * - Byte 3: Joystick Y (int8_t, -127 to 127)
- * - Byte 4: Checksum (uint8_t)
- *   - Calculated as: (Byte 0 ^ Byte 1 ^ Byte 2 ^ Byte 3)
- * =================================================================================
- */
-#define PROTOCOL_HEADER 0xA5
-#define PACKET_SIZE 5
+// D-Pad Hat switch values
+typedef enum {
+    HAT_SWITCH_NEUTRAL = 0,
+    HAT_SWITCH_UP,
+    HAT_SWITCH_UP_RIGHT,
+    HAT_SWITCH_RIGHT,
+    HAT_SWITCH_DOWN_RIGHT,
+    HAT_SWITCH_DOWN,
+    HAT_SWITCH_DOWN_LEFT,
+    HAT_SWITCH_LEFT,
+    HAT_SWITCH_UP_LEFT,
+} hat_switch_t;
 
-// Struct to hold the received controller data
-typedef struct {
-    uint8_t button_state;
-    int8_t joy_x;
-    int8_t joy_y;
-} controller_data_t;
+// Struct for the HID report that we send to the host
+typedef struct __attribute__((packed)) {
+    int8_t x, y, rx, ry; // 4 axes
+    uint8_t z, rz;       // 2 triggers
+    uint8_t hat;         // D-Pad
+    uint16_t buttons;    // 16 buttons
+} hid_report_t;
 
-// Global HID report instance
-static hid_gamepad_report_t gamepad_report;
+// Struct to hold the received v2 controller data
+typedef struct __attribute__((packed)) {
+    uint16_t buttons;
+    int8_t lx, ly, rx, ry;
+    uint8_t l2, r2;
+    uint8_t dpad;
+} gamepad_data_v2_t;
 
+// Global instance to hold the latest controller data from UART
+static gamepad_data_v2_t gamepad_data;
 
-// Use UART1 for communication, pins 4 and 5
+// Global instance of the HID report to be sent
+static hid_report_t hid_report;
+
+// --- Protocol and UART ---
+#define PROTOCOL_V2_HEADER 0xA6
+#define PROTOCOL_V2_SIZE 11
 #define UART_ID uart1
 #define BAUD_RATE 115200
 #define UART_TX_PIN 4
 #define UART_RX_PIN 5
 
-// Function to set up UART
 void setup_uart() {
     uart_init(UART_ID, BAUD_RATE);
     gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
-    printf("UART Initialized\n");
 }
 
-// This function will be called repeatedly in the main loop
 void process_uart() {
-    static uint8_t packet_buffer[PACKET_SIZE];
+    static uint8_t packet_buffer[PROTOCOL_V2_SIZE];
     static uint8_t buffer_idx = 0;
-
-    // Process all available bytes from UART
     while (uart_is_readable(UART_ID)) {
         uint8_t ch = uart_getc(UART_ID);
-
-        // The first byte of a packet must be the header.
-        // If we're not at the start of a packet, we wait for a header byte.
         if (buffer_idx == 0) {
-            if (ch == PROTOCOL_HEADER) {
-                packet_buffer[buffer_idx++] = ch;
-            }
+            if (ch == PROTOCOL_V2_HEADER) packet_buffer[buffer_idx++] = ch;
         } else {
-            // We are already building a packet, so store the next byte.
             packet_buffer[buffer_idx++] = ch;
-
-            // If the packet is complete (all bytes received)
-            if (buffer_idx >= PACKET_SIZE) {
-                // Calculate checksum from the first 4 bytes
-                uint8_t calculated_checksum = packet_buffer[0] ^ packet_buffer[1] ^ packet_buffer[2] ^ packet_buffer[3];
-                uint8_t received_checksum = packet_buffer[4];
-
-                // Validate checksum
-                if (calculated_checksum == received_checksum) {
-                    // Checksum is valid. Update the global gamepad report.
-                    // The hid_task() will then send this data to the PC.
-                    gamepad_report.buttons = packet_buffer[1];
-                    gamepad_report.x       = (int8_t)packet_buffer[2];
-                    gamepad_report.y       = (int8_t)packet_buffer[3];
-
-                    // Print parsed data for debugging
-                    printf("UART -> HID: Buttons=0x%02X, X=%d, Y=%d\n",
-                           gamepad_report.buttons, gamepad_report.x, gamepad_report.y);
-                } else {
-                    // Checksum failed
-                    printf("Error: Checksum failed!\n");
+            if (buffer_idx >= PROTOCOL_V2_SIZE) {
+                uint8_t checksum = 0;
+                for (int i = 0; i < PROTOCOL_V2_SIZE - 1; i++) checksum ^= packet_buffer[i];
+                if (checksum == packet_buffer[PROTOCOL_V2_SIZE - 1]) {
+                    // Checksum OK, parse into the global state
+                    memcpy(&gamepad_data, &packet_buffer[1], sizeof(gamepad_data_v2_t));
                 }
-
-                // Reset buffer index to wait for the next packet header
                 buffer_idx = 0;
             }
         }
     }
 }
 
-//--------------------------------------------------------------------+
-// TinyUSB HID Task
-//--------------------------------------------------------------------+
-void hid_task(void)
-{
-  // Polling interval in milliseconds
-  const uint32_t interval_ms = 10;
-  static uint32_t start_ms = 0;
-
-  if ( board_millis() - start_ms < interval_ms) return; // not enough time
-  start_ms += interval_ms;
-
-  // Remote wakeup
-  if ( tud_suspended() )
-  {
-    // Wake up host if we are in suspend mode
-    // and REMOTE_WAKEUP feature is enabled by host
-    tud_remote_wakeup();
-  }
-
-  // Send the report if HID device is ready
-  if ( tud_hid_ready() )
-  {
-    // For now, we send a report with all inputs zeroed.
-    // In the next step, we will populate this with data from UART.
-    tud_hid_report(0, &gamepad_report, sizeof(gamepad_report));
-  }
-}
-
-//--------------------------------------------------------------------+
-// TinyUSB Callbacks
-//--------------------------------------------------------------------+
-
-// Invoked when received GET_REPORT control request
-// Application must fill buffer report's content and return its length.
-// Return 0 will cause the stack to STALL request
-uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen)
-{
-  // We have nothing to report to the host for GET_REPORT
-  (void) instance;
-  (void) report_id;
-  (void) report_type;
-  (void) buffer;
-  (void) reqlen;
-
+// --- HID Task and Callbacks ---
+uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen) {
+  (void) instance; (void) report_id; (void) report_type; (void) buffer; (void) reqlen;
   return 0;
 }
 
-// Invoked when received SET_REPORT control request or
-// received data on OUT endpoint ( Report ID = 0, Type = 0 )
-void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize)
-{
-  // We have nothing to do with reports from the host
-  (void) instance;
-  (void) report_id;
-  (void) report_type;
-  (void) buffer;
-  (void) bufsize;
+void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize) {
+  (void) instance; (void) report_id; (void) report_type; (void) buffer; (void) bufsize;
 }
 
+uint8_t dpad_to_hat(uint8_t dpad_mask) {
+    if (dpad_mask == 0b0001) return HAT_SWITCH_UP;
+    if (dpad_mask == 0b1001) return HAT_SWITCH_UP_RIGHT;
+    if (dpad_mask == 0b1000) return HAT_SWITCH_RIGHT;
+    if (dpad_mask == 0b1010) return HAT_SWITCH_DOWN_RIGHT;
+    if (dpad_mask == 0b0010) return HAT_SWITCH_DOWN;
+    if (dpad_mask == 0b0110) return HAT_SWITCH_DOWN_LEFT;
+    if (dpad_mask == 0b0100) return HAT_SWITCH_LEFT;
+    if (dpad_mask == 0b0101) return HAT_SWITCH_UP_LEFT;
+    return HAT_SWITCH_NEUTRAL;
+}
 
-int main()
-{
-    // Initialize stdio for debugging output over USB
-    stdio_init_all();
+void hid_task(void) {
+  const uint32_t interval_ms = 5; // Send report more frequently
+  static uint32_t start_ms = 0;
+
+  if ( board_millis() - start_ms < interval_ms) return;
+  start_ms += interval_ms;
+
+  if ( tud_suspended() ) tud_remote_wakeup();
+
+  if ( tud_hid_ready() ) {
+    // Map the UART data to the HID report
+    hid_report.x = gamepad_data.lx;
+    hid_report.y = gamepad_data.ly;
+    hid_report.rx = gamepad_data.rx;
+    hid_report.ry = gamepad_data.ry;
+    hid_report.z = gamepad_data.l2;
+    hid_report.rz = gamepad_data.r2;
+    hid_report.buttons = gamepad_data.buttons;
+    hid_report.hat = dpad_to_hat(gamepad_data.dpad);
     
-    // Setup UART for communication with PC
-    setup_uart();
+    tud_hid_report(1, &hid_report, sizeof(hid_report));
+  }
+}
 
-    // Initialize TinyUSB stack
+// --- Main ---
+int main() {
+    board_init();
+    setup_uart();
     tusb_init();
 
-    // Main loop
     while (true) {
-        tud_task(); // TinyUSB device task
-        hid_task(); // Application HID task
-        process_uart(); // Application UART task
+        tud_task();
+        hid_task();
+        process_uart();
     }
-
-    return 0; // Should not be reached
+    return 0;
 }

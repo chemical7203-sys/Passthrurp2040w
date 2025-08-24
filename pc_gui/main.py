@@ -7,14 +7,22 @@ from serial_handler import SerialHandler
 from device_manager import get_available_gamepads, get_available_serial_ports
 
 class MainApplication:
-    """The main class that orchestrates the UI, device discovery, and handlers."""
     def __init__(self):
         self.app = QApplication(sys.argv)
         self.ui = GamepadUI()
         self.gamepad_signals = GamepadSignals()
         self.ds4_handler = DS4Handler(self.gamepad_signals)
         self.serial_handler = SerialHandler()
-        self.last_serial_state = {'buttons': 0, 'x': 0, 'y': 0}
+
+        # Expanded state for v2 protocol
+        self.serial_state = {
+            'buttons': 0, 'dpad': 0,
+            'lx': 0, 'ly': 0, 'rx': 0, 'ry': 0,
+            'l2': 0, 'r2': 0,
+        }
+        # Map pygame button index to bitmask
+        self.button_map = {0:1, 1:2, 2:4, 3:8, 4:16, 5:32, 8:64, 9:128, 10:256, 11:512}
+
         self.gamepads = []
         self.connect_signals()
         self.refresh_all_devices()
@@ -23,21 +31,20 @@ class MainApplication:
         self.serial_timer.start(8)
 
     def connect_signals(self):
-        """Connects signals from the UI and gamepad handler to the appropriate slots."""
-        # UI signals
         self.ui.serial_connect_btn.clicked.connect(self.toggle_serial_connection)
         self.ui.serial_refresh_btn.clicked.connect(self.refresh_serial_ports)
         self.ui.gamepad_refresh_btn.clicked.connect(self.refresh_gamepads)
         self.ui.gamepad_select.currentIndexChanged.connect(self.select_gamepad)
 
-        # Gamepad signals for UI updates (Corrected to point to gamepad_widget)
         self.gamepad_signals.stick_event.connect(self.ui.gamepad_widget.update_stick)
         self.gamepad_signals.button_event.connect(self.ui.gamepad_widget.update_button)
         self.gamepad_signals.gamepad_disconnected.connect(self.handle_gamepad_disconnect)
 
-        # Gamepad signals for updating the state to be sent
+        # Connect all events to update the serial state
         self.gamepad_signals.stick_event.connect(self.update_serial_state)
         self.gamepad_signals.button_event.connect(self.update_serial_state)
+        self.gamepad_signals.trigger_event.connect(self.update_serial_state)
+        self.gamepad_signals.dpad_event.connect(self.update_serial_state)
 
     def refresh_all_devices(self):
         self.refresh_serial_ports()
@@ -76,24 +83,36 @@ class MainApplication:
             elif port:
                 QMessageBox.critical(self.ui, "Connection Error", f"Failed to connect to port {port}.")
 
-    def update_serial_state(self, event_code, event_value):
-        """This slot only updates the state dictionary. It does not send data."""
-        # This mapping is simplified for the v1 protocol
-        if event_code == 'BTN_SOUTH':
-            self.last_serial_state['buttons'] = 1 if event_value else 0
-        elif event_code == 'ABS_X':
-            # event_value is a float from -1.0 to 1.0. Convert to -127 to 127.
-            self.last_serial_state['x'] = int(event_value * 127)
-        elif event_code == 'ABS_Y':
-            self.last_serial_state['y'] = int(event_value * 127)
+    def update_serial_state(self, code, value):
+        # Sticks
+        if code == 'ABS_X': self.serial_state['lx'] = int(value * 127)
+        elif code == 'ABS_Y': self.serial_state['ly'] = int(value * 127)
+        elif code == 'ABS_RX': self.serial_state['rx'] = int(value * 127)
+        elif code == 'ABS_RY': self.serial_state['ry'] = int(value * 127)
+        # Triggers
+        elif code == 'ABS_Z': self.serial_state['l2'] = int((value + 1) / 2 * 255)
+        elif code == 'ABS_RZ': self.serial_state['r2'] = int((value + 1) / 2 * 255)
+        # Buttons
+        elif code in self.button_map:
+            bit = self.button_map[code]
+            if value: # pressed
+                self.serial_state['buttons'] |= bit
+            else: # released
+                self.serial_state['buttons'] &= ~bit
+        # D-Pad
+        elif code == 'ABS_HAT0X':
+            self.serial_state['dpad'] &= ~0b0100 # Clear left
+            self.serial_state['dpad'] &= ~0b1000 # Clear right
+            if value < 0: self.serial_state['dpad'] |= 0b0100 # Set left
+            elif value > 0: self.serial_state['dpad'] |= 0b1000 # Set right
+        elif code == 'ABS_HAT0Y':
+            self.serial_state['dpad'] &= ~0b0001 # Clear up
+            self.serial_state['dpad'] &= ~0b0010 # Clear down
+            if value < 0: self.serial_state['dpad'] |= 0b0001 # Set up
+            elif value > 0: self.serial_state['dpad'] |= 0b0010 # Set down
 
     def send_latest_serial_state(self):
-        """Called by the QTimer to send the most recent state."""
-        self.serial_handler.send_gamepad_state(
-            self.last_serial_state['buttons'],
-            self.last_serial_state['x'],
-            self.last_serial_state['y']
-        )
+        self.serial_handler.send_gamepad_state_v2(self.serial_state)
 
     def run(self):
         self.ui.show()
