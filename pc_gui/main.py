@@ -39,6 +39,7 @@ class MainApplication:
         self.gamepad_signals.stick_event.connect(self.ui.gamepad_widget.update_stick)
         self.gamepad_signals.button_event.connect(self.ui.gamepad_widget.update_button)
         self.gamepad_signals.gamepad_disconnected.connect(self.handle_gamepad_disconnect)
+        self.gamepad_signals.raw_event.connect(self.ui.log_raw_event) # Connect the raw event log
 
         # Connect all events to update the serial state
         self.gamepad_signals.stick_event.connect(self.update_serial_state)

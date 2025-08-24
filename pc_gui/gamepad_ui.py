@@ -2,18 +2,19 @@ import sys
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QGridLayout, QComboBox,
     QPushButton, QHBoxLayout, QGraphicsView, QGraphicsScene, QGraphicsEllipseItem,
-    QGraphicsRectItem
+    QGraphicsRectItem, QTextEdit
 )
 from PyQt6.QtGui import QFont, QColor, QBrush, QPen
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QRectF
 
 # --- Signals ---
 class GamepadSignals(QObject):
-    stick_event = pyqtSignal(str, float) # Changed to float for -1.0 to 1.0
-    trigger_event = pyqtSignal(str, float) # Changed to float
+    stick_event = pyqtSignal(str, float)
+    trigger_event = pyqtSignal(str, float)
     button_event = pyqtSignal(str, bool)
     dpad_event = pyqtSignal(str, int)
     gamepad_disconnected = pyqtSignal()
+    raw_event = pyqtSignal(str) # For the raw event monitor
 
 # --- Gamepad Graphics Widget ---
 class GamepadWidget(QGraphicsView):
@@ -119,6 +120,19 @@ class GamepadUI(QWidget):
         serial_layout.addWidget(self.serial_refresh_btn)
         serial_layout.addWidget(self.serial_connect_btn)
         main_layout.addLayout(serial_layout)
+
+        # --- Raw Event Monitor ---
+        main_layout.addWidget(QLabel("Raw Pygame Event Monitor:"))
+        self.event_monitor = QTextEdit()
+        self.event_monitor.setReadOnly(True)
+        self.event_monitor.setFixedHeight(100)
+        main_layout.addWidget(self.event_monitor)
+
+    def log_raw_event(self, event_string):
+        """Appends a string to the event monitor."""
+        self.event_monitor.append(event_string)
+        # Auto-scroll to the bottom
+        self.event_monitor.verticalScrollBar().setValue(self.event_monitor.verticalScrollBar().maximum())
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

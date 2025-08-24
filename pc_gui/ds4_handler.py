@@ -63,6 +63,9 @@ class DS4Handler(threading.Thread):
 
     def _process_event(self, event):
         """Processes a single pygame event and emits a signal."""
+        # Emit the raw event for debugging
+        self.signals.raw_event.emit(str(event))
+
         if event.type == pygame.JOYAXISMOTION:
             # Axis 0: Left Stick X, Axis 1: Left Stick Y
             # Axis 2: L2 Trigger, Axis 3: Right Stick X, Axis 4: Right Stick Y, Axis 5: R2 Trigger
