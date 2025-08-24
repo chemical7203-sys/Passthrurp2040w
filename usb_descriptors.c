@@ -13,7 +13,7 @@ tusb_desc_device_t const desc_device =
     .bDeviceProtocol    = 0x00,
     .bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE,
     .idVendor           = 0x2E8A, // Raspberry Pi
-    .idProduct          = 0xC003, // New Product ID for full gamepad
+    .idProduct          = 0xC003, // Full Gamepad
     .bcdDevice          = 0x0100,
     .iManufacturer      = 0x01,
     .iProduct           = 0x02,
@@ -33,9 +33,8 @@ uint8_t const desc_hid_report[] =
     HID_USAGE_PAGE ( HID_USAGE_PAGE_DESKTOP     ),
     HID_USAGE      ( HID_USAGE_DESKTOP_GAMEPAD  ),
     HID_COLLECTION ( HID_COLLECTION_APPLICATION ),
-        // Report ID
-        HID_REPORT_ID(1)
-        // 16 Buttons
+        HID_REPORT_ID(1),
+        // Buttons
         HID_USAGE_PAGE ( HID_USAGE_PAGE_BUTTON ),
         HID_USAGE_MIN    ( 1  ),
         HID_USAGE_MAX    ( 16 ),
@@ -44,37 +43,25 @@ uint8_t const desc_hid_report[] =
         HID_REPORT_COUNT ( 16 ),
         HID_REPORT_SIZE  ( 1  ),
         HID_INPUT        ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ),
-        // D-Pad (Hat switch)
+        // D-Pad
         HID_USAGE_PAGE ( HID_USAGE_PAGE_DESKTOP ),
         HID_USAGE      ( HID_USAGE_DESKTOP_HAT_SWITCH ),
         HID_LOGICAL_MIN  ( 0 ),
-        HID_LOGICAL_MAX  ( 7 ), // 8 directions
-        HID_PHYSICAL_MIN ( 0 ),
-        HID_PHYSICAL_MAX_N ( 315, 2 ),
+        HID_LOGICAL_MAX  ( 8 ), // 0-7 for directions, 8 for neutral
         HID_REPORT_COUNT ( 1 ),
-        HID_REPORT_SIZE  ( 4 ),
+        HID_REPORT_SIZE  ( 8 ), // Use a full byte for hat switch for alignment
         HID_INPUT        ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ),
-        // Padding for Hat switch to make it a full byte
-        HID_REPORT_COUNT ( 1 ),
-        HID_REPORT_SIZE  ( 4 ),
-        HID_INPUT        ( HID_CONSTANT | HID_VARIABLE | HID_ABSOLUTE ),
-        // 4 Analog Axes (LX, LY, RX, RY)
+        // Axes
         HID_USAGE_PAGE ( HID_USAGE_PAGE_DESKTOP ),
         HID_USAGE      ( HID_USAGE_DESKTOP_X  ),
         HID_USAGE      ( HID_USAGE_DESKTOP_Y  ),
         HID_USAGE      ( HID_USAGE_DESKTOP_RX ),
         HID_USAGE      ( HID_USAGE_DESKTOP_RY ),
-        HID_LOGICAL_MIN  ( -127 ),
-        HID_LOGICAL_MAX  ( 127 ),
-        HID_REPORT_COUNT ( 4 ),
-        HID_REPORT_SIZE  ( 8 ),
-        HID_INPUT        ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ),
-        // 2 Trigger Axes (L2, R2)
         HID_USAGE      ( HID_USAGE_DESKTOP_Z ),
         HID_USAGE      ( HID_USAGE_DESKTOP_RZ ),
-        HID_LOGICAL_MIN  ( 0 ),
-        HID_LOGICAL_MAX  ( 255 ),
-        HID_REPORT_COUNT ( 2 ),
+        HID_LOGICAL_MIN  ( -127 ),
+        HID_LOGICAL_MAX  ( 127 ),
+        HID_REPORT_COUNT ( 6 ),
         HID_REPORT_SIZE  ( 8 ),
         HID_INPUT        ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ),
     HID_COLLECTION_END
