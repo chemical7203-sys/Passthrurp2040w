@@ -62,10 +62,9 @@ class DS4Handler(threading.Thread):
                 2: 'ABS_RX',   # Right Stick X
                 3: 'ABS_RY',   # Right Stick Y
                 4: 'ABS_Z',    # L2 Trigger
-                5: 'ABS_RZ',   # R2 Trigger (Assumed)
+                5: 'ABS_RZ',   # R2 Trigger
             }
             if event.axis in axis_map:
-                # Triggers are axes, but their event type is distinct for clarity
                 if event.axis in [4, 5]:
                     self.signals.trigger_event.emit(axis_map[event.axis], event.value)
                 else:
@@ -75,24 +74,16 @@ class DS4Handler(threading.Thread):
             pressed = (event.type == pygame.JOYBUTTONDOWN)
             # Corrected Button Mapping based on user feedback
             button_map = {
-                0: 'BTN_SOUTH',  # X on DS4
-                1: 'BTN_EAST',   # Circle
-                2: 'BTN_WEST',   # Square
-                3: 'BTN_NORTH',  # Triangle
-                9: 'BTN_TL',     # L1
-                10: 'BTN_TR',    # R1
-                7: 'BTN_THUMBL', # L3
-                8: 'BTN_THUMBR', # R3
-                11: 'DPAD_UP',
-                12: 'DPAD_DOWN',
-                13: 'DPAD_LEFT',
-                14: 'DPAD_RIGHT',
-                # Select/Start might be 4, 6, etc.
+                0: 'BTN_SOUTH', 1: 'BTN_EAST', 2: 'BTN_WEST', 3: 'BTN_NORTH',
+                9: 'BTN_TL', 10: 'BTN_TR',
+                7: 'BTN_THUMBL', 8: 'BTN_THUMBR',
+                11: 'DPAD_UP', 12: 'DPAD_DOWN', 13: 'DPAD_LEFT', 14: 'DPAD_RIGHT',
+                # Assuming 6 is Start and 4 is Select for DS4
+                6: 'BTN_START', 4: 'BTN_SELECT'
             }
             if event.button in button_map:
-                # D-pad events are now treated as button events
                 self.signals.button_event.emit(button_map[event.button], pressed)
 
-        # JOYHATMOTION is no longer used as D-Pad is buttons
-        # elif event.type == pygame.JOYHATMOTION:
-        #     ...
+        # JOYHATMOTION is not used for this controller
+        elif event.type == pygame.JOYHATMOTION:
+            pass
