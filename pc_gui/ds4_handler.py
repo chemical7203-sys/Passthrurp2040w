@@ -79,7 +79,7 @@ class DS4Handler(threading.Thread):
                 7: 'BTN_THUMBL', 8: 'BTN_THUMBR',
                 11: 'DPAD_UP', 12: 'DPAD_DOWN', 13: 'DPAD_LEFT', 14: 'DPAD_RIGHT',
                 # Assuming 6 is Start and 4 is Select for DS4
-                6: 'BTN_START', 4: 'BTN_SELECT'
+                6: 'BTN_START', 4: 'BTN_SELECT', 5: 'BTN_MODE'
             }
             if event.button in button_map:
                 self.signals.button_event.emit(button_map[event.button], pressed)

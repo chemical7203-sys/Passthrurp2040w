@@ -25,6 +25,7 @@ class MainApplication:
             'BTN_TL':     ( 'buttons', 1<<4 ), 'BTN_TR':     ( 'buttons', 1<<5 ),
             'BTN_SELECT': ( 'buttons', 1<<6 ), 'BTN_START':  ( 'buttons', 1<<7 ),
             'BTN_THUMBL': ( 'buttons', 1<<8 ), 'BTN_THUMBR': ( 'buttons', 1<<9 ),
+            'BTN_MODE':   ( 'buttons', 1<<10), // PS Button
             'DPAD_UP':    ( 'dpad', 1<<0 ), 'DPAD_DOWN':  ( 'dpad', 1<<1 ),
             'DPAD_LEFT':  ( 'dpad', 1<<2 ), 'DPAD_RIGHT': ( 'dpad', 1<<3 ),
         }

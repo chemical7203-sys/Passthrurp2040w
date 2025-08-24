@@ -51,16 +51,16 @@ uint8_t const desc_hid_report[] =
         HID_REPORT_COUNT ( 1 ),
         HID_REPORT_SIZE  ( 8 ), // Use a full byte for hat switch for alignment
         HID_INPUT        ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ),
-        // Axes
+        // Axes (X, Y, Z, Rz, Rx, Ry) in standard order
         HID_USAGE_PAGE ( HID_USAGE_PAGE_DESKTOP ),
-        HID_USAGE      ( HID_USAGE_DESKTOP_X  ),
-        HID_USAGE      ( HID_USAGE_DESKTOP_Y  ),
+        HID_USAGE      ( HID_USAGE_DESKTOP_X ),
+        HID_USAGE      ( HID_USAGE_DESKTOP_Y ),
+        HID_USAGE      ( HID_USAGE_DESKTOP_Z ), // L2
+        HID_USAGE      ( HID_USAGE_DESKTOP_RZ ),// R2
         HID_USAGE      ( HID_USAGE_DESKTOP_RX ),
         HID_USAGE      ( HID_USAGE_DESKTOP_RY ),
-        HID_USAGE      ( HID_USAGE_DESKTOP_Z ),
-        HID_USAGE      ( HID_USAGE_DESKTOP_RZ ),
-        HID_LOGICAL_MIN  ( -127 ),
-        HID_LOGICAL_MAX  ( 127 ),
+        HID_LOGICAL_MIN  ( 0 ),
+        HID_LOGICAL_MAX  ( 255 ),
         HID_REPORT_COUNT ( 6 ),
         HID_REPORT_SIZE  ( 8 ),
         HID_INPUT        ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ),
