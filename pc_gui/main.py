@@ -46,7 +46,6 @@ class MainApplication:
         self.gamepad_signals.stick_event.connect(self.update_serial_state)
         self.gamepad_signals.button_event.connect(self.update_serial_state)
         self.gamepad_signals.trigger_event.connect(self.update_serial_state)
-        self.gamepad_signals.dpad_event.connect(self.update_serial_state)
 
     def refresh_all_devices(self):
         self.refresh_serial_ports()
