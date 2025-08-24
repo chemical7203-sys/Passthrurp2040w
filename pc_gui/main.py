@@ -14,19 +14,13 @@ class MainApplication:
         self.gamepad_signals = GamepadSignals()
         self.ds4_handler = DS4Handler(self.gamepad_signals)
         self.serial_handler = SerialHandler()
-
-        # Store the last known state to send over serial
         self.last_serial_state = {'buttons': 0, 'x': 0, 'y': 0}
-
         self.gamepads = []
-
         self.connect_signals()
         self.refresh_all_devices()
-
-        # --- Set up the periodic timer for sending serial data ---
         self.serial_timer = QTimer()
         self.serial_timer.timeout.connect(self.send_latest_serial_state)
-        self.serial_timer.start(8) # Send data every 8ms (approx 125 Hz)
+        self.serial_timer.start(8)
 
     def connect_signals(self):
         """Connects signals from the UI and gamepad handler to the appropriate slots."""
@@ -36,9 +30,9 @@ class MainApplication:
         self.ui.gamepad_refresh_btn.clicked.connect(self.refresh_gamepads)
         self.ui.gamepad_select.currentIndexChanged.connect(self.select_gamepad)
 
-        # Gamepad signals for UI updates
-        self.gamepad_signals.stick_event.connect(self.ui.update_stick)
-        self.gamepad_signals.button_event.connect(self.ui.update_button)
+        # Gamepad signals for UI updates (Corrected to point to gamepad_widget)
+        self.gamepad_signals.stick_event.connect(self.ui.gamepad_widget.update_stick)
+        self.gamepad_signals.button_event.connect(self.ui.gamepad_widget.update_button)
         self.gamepad_signals.gamepad_disconnected.connect(self.handle_gamepad_disconnect)
 
         # Gamepad signals for updating the state to be sent
@@ -84,15 +78,14 @@ class MainApplication:
 
     def update_serial_state(self, event_code, event_value):
         """This slot only updates the state dictionary. It does not send data."""
+        # This mapping is simplified for the v1 protocol
         if event_code == 'BTN_SOUTH':
             self.last_serial_state['buttons'] = 1 if event_value else 0
         elif event_code == 'ABS_X':
-            # Pygame axis is -1 to 1. Convert to 0-255, then to -127 to 127
-            value_0_255 = int((event_value + 1) / 2 * 255)
-            self.last_serial_state['x'] = value_0_255 - 128
+            # Pygame axis is -1.0 to 1.0. Convert to -127 to 127
+            self.last_serial_state['x'] = int(event_value * 127)
         elif event_code == 'ABS_Y':
-            value_0_255 = int((event_value + 1) / 2 * 255)
-            self.last_serial_state['y'] = value_0_255 - 128
+            self.last_serial_state['y'] = int(event_value * 127)
 
     def send_latest_serial_state(self):
         """Called by the QTimer to send the most recent state."""
