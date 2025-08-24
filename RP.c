@@ -1,32 +1,24 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <string.h>
 #include "pico/stdlib.h"
 #include "pico/time.h"
 #include "hardware/uart.h"
 #include "tusb.h"
 #include "bsp/board.h"
 
-// D-Pad Hat switch values
+// D-Pad Hat switch standard values
 typedef enum {
-    HAT_SWITCH_NEUTRAL = 0,
-    HAT_SWITCH_UP,
-    HAT_SWITCH_UP_RIGHT,
-    HAT_SWITCH_RIGHT,
-    HAT_SWITCH_DOWN_RIGHT,
-    HAT_SWITCH_DOWN,
-    HAT_SWITCH_DOWN_LEFT,
-    HAT_SWITCH_LEFT,
-    HAT_SWITCH_UP_LEFT,
+    HAT_SWITCH_NEUTRAL = 8,
+    HAT_SWITCH_UP = 0,
+    HAT_SWITCH_UP_RIGHT = 1,
+    HAT_SWITCH_RIGHT = 2,
+    HAT_SWITCH_DOWN_RIGHT = 3,
+    HAT_SWITCH_DOWN = 4,
+    HAT_SWITCH_DOWN_LEFT = 5,
+    HAT_SWITCH_LEFT = 6,
+    HAT_SWITCH_UP_LEFT = 7,
 } hat_switch_t;
-
-// Struct for the HID report that we send to the host
-// The order of members MUST MATCH the HID report descriptor in usb_descriptors.c
-typedef struct __attribute__((packed)) {
-    uint16_t buttons;    // 16 buttons
-    uint8_t hat;         // D-Pad
-    int8_t x, y, rx, ry; // 4 axes
-    uint8_t z, rz;       // 2 triggers
-} hid_report_t;
 
 // Struct to hold the received v2 controller data
 typedef struct __attribute__((packed)) {
@@ -38,9 +30,6 @@ typedef struct __attribute__((packed)) {
 
 // Global instance to hold the latest controller data from UART
 static gamepad_data_v2_t gamepad_data;
-
-// Global instance of the HID report to be sent
-static hid_report_t hid_report;
 
 // --- Protocol and UART ---
 #define PROTOCOL_V2_HEADER 0xA6
@@ -69,16 +58,8 @@ void process_uart() {
                 uint8_t checksum = 0;
                 for (int i = 0; i < PROTOCOL_V2_SIZE - 1; i++) checksum ^= packet_buffer[i];
                 if (checksum == packet_buffer[PROTOCOL_V2_SIZE - 1]) {
-                    // Checksum OK, parse the packet into the global state
-                    gamepad_data.buttons = (uint16_t)packet_buffer[1] | ((uint16_t)packet_buffer[2] << 8);
-                    gamepad_data.lx      = (int8_t)packet_buffer[3];
-                    gamepad_data.ly      = (int8_t)packet_buffer[4];
-                    gamepad_data.rx      = (int8_t)packet_buffer[5];
-                    gamepad_data.ry      = (int8_t)packet_buffer[6];
-                    gamepad_data.l2      = packet_buffer[7];
-                    gamepad_data.r2      = packet_buffer[8];
-                    gamepad_data.dpad    = packet_buffer[9];
-
+                    // Checksum OK, parse into the global state
+                    memcpy(&gamepad_data, &packet_buffer[1], sizeof(gamepad_data_v2_t));
                     // Send parsed data back for debugging
                     char debug_buf[128];
                     sprintf(debug_buf, "Rcvd: B:%04x LX:%d LY:%d RX:%d RY:%d L2:%u R2:%u D:%u\r\n",
@@ -104,19 +85,30 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
 }
 
 uint8_t dpad_to_hat(uint8_t dpad_mask) {
-    if (dpad_mask == 0b0001) return HAT_SWITCH_UP;
-    if (dpad_mask == 0b1001) return HAT_SWITCH_UP_RIGHT;
-    if (dpad_mask == 0b1000) return HAT_SWITCH_RIGHT;
-    if (dpad_mask == 0b1010) return HAT_SWITCH_DOWN_RIGHT;
-    if (dpad_mask == 0b0010) return HAT_SWITCH_DOWN;
-    if (dpad_mask == 0b0110) return HAT_SWITCH_DOWN_LEFT;
-    if (dpad_mask == 0b0100) return HAT_SWITCH_LEFT;
-    if (dpad_mask == 0b0101) return HAT_SWITCH_UP_LEFT;
-    return HAT_SWITCH_NEUTRAL;
+    // DPAD_UP:1, DPAD_DOWN:2, DPAD_LEFT:4, DPAD_RIGHT:8
+    static const uint8_t hat_map[16] = {
+        HAT_SWITCH_NEUTRAL,    // 0000
+        HAT_SWITCH_UP,         // 0001
+        HAT_SWITCH_DOWN,       // 0010
+        HAT_SWITCH_NEUTRAL,    // 0011 -> U+D not possible
+        HAT_SWITCH_LEFT,       // 0100
+        HAT_SWITCH_UP_LEFT,    // 0101
+        HAT_SWITCH_DOWN_LEFT,  // 0110
+        HAT_SWITCH_NEUTRAL,    // 0111 -> L+R not possible
+        HAT_SWITCH_RIGHT,      // 1000
+        HAT_SWITCH_UP_RIGHT,   // 1001
+        HAT_SWITCH_DOWN_RIGHT, // 1010
+        HAT_SWITCH_NEUTRAL,    // 1011
+        HAT_SWITCH_NEUTRAL,    // 1100 -> L+R not possible
+        HAT_SWITCH_NEUTRAL,    // 1101
+        HAT_SWITCH_NEUTRAL,    // 1110
+        HAT_SWITCH_NEUTRAL,    // 1111
+    };
+    return hat_map[dpad_mask & 0x0F];
 }
 
 void hid_task(void) {
-  const uint32_t interval_ms = 5; // Send report more frequently
+  const uint32_t interval_ms = 8;
   static uint32_t start_ms = 0;
 
   if ( board_millis() - start_ms < interval_ms) return;
@@ -125,17 +117,27 @@ void hid_task(void) {
   if ( tud_suspended() ) tud_remote_wakeup();
 
   if ( tud_hid_ready() ) {
-    // Map the UART data to the HID report
-    hid_report.x = gamepad_data.lx;
-    hid_report.y = gamepad_data.ly;
-    hid_report.rx = gamepad_data.rx;
-    hid_report.ry = gamepad_data.ry;
-    hid_report.z = gamepad_data.l2;
-    hid_report.rz = gamepad_data.r2;
-    hid_report.buttons = gamepad_data.buttons;
-    hid_report.hat = dpad_to_hat(gamepad_data.dpad);
+    // Use a temporary byte array for the report to avoid padding/alignment issues
+    uint8_t report[9] = {0};
+    uint16_t buttons = gamepad_data.buttons;
+    uint8_t hat = dpad_to_hat(gamepad_data.dpad);
+
+    // Manually construct the report according to the HID descriptor
+    // 1. Buttons (2 bytes)
+    report[0] = buttons & 0xFF;
+    report[1] = (buttons >> 8) & 0xFF;
+    // 2. Hat (1 byte)
+    report[2] = hat;
+    // 3. Axes (4 bytes)
+    report[3] = gamepad_data.lx;
+    report[4] = gamepad_data.ly;
+    report[5] = gamepad_data.rx;
+    report[6] = gamepad_data.ry;
+    // 4. Triggers (2 bytes)
+    report[7] = gamepad_data.l2;
+    report[8] = gamepad_data.r2;
     
-    tud_hid_report(1, &hid_report, sizeof(hid_report));
+    tud_hid_report(1, report, sizeof(report));
   }
 }
 
