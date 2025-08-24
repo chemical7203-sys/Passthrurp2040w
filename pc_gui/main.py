@@ -10,7 +10,7 @@ class MainApplication:
     def __init__(self):
         self.app = QApplication(sys.argv)
         self.ui = GamepadUI()
-        self.gamepad_signals = GamepadSignals() # The one and only signals object
+        self.gamepad_signals = GamepadSignals()
         self.ds4_handler = DS4Handler(self.gamepad_signals)
         self.serial_handler = SerialHandler()
 
@@ -33,13 +33,15 @@ class MainApplication:
         self.connect_signals()
         self.refresh_all_devices()
 
+        # Timer for sending data TO the Pico
         self.tx_timer = QTimer()
         self.tx_timer.timeout.connect(self.send_latest_serial_state)
         self.tx_timer.start(8)
 
-        self.rx_timer = QTimer()
-        self.rx_timer.timeout.connect(self.read_serial_data)
-        self.rx_timer.start(20)
+        # Timer for batch-updating the RX monitor FROM the Pico
+        self.rx_monitor_timer = QTimer()
+        self.rx_monitor_timer.timeout.connect(self.update_rx_monitor)
+        self.rx_monitor_timer.start(200) # Update UI 5 times per second
 
     def connect_signals(self):
         self.ui.serial_connect_btn.clicked.connect(self.toggle_serial_connection)
@@ -47,25 +49,21 @@ class MainApplication:
         self.ui.gamepad_refresh_btn.clicked.connect(self.refresh_gamepads)
         self.ui.gamepad_select.currentIndexChanged.connect(self.select_gamepad)
 
-        # Corrected signal connections
         self.gamepad_signals.stick_event.connect(self.ui.gamepad_widget.update_stick)
         self.gamepad_signals.button_event.connect(self.ui.gamepad_widget.update_button)
         self.gamepad_signals.trigger_event.connect(self.ui.gamepad_widget.update_trigger)
         self.gamepad_signals.gamepad_disconnected.connect(self.handle_gamepad_disconnect)
         self.gamepad_signals.raw_event.connect(self.ui.log_raw_event)
 
-        # Connect to serial state updater
         self.gamepad_signals.stick_event.connect(self.update_serial_state)
         self.gamepad_signals.button_event.connect(self.update_serial_state)
         self.gamepad_signals.trigger_event.connect(self.update_serial_state)
 
-        # Connect serial RX to UI
-        self.serial_handler.on_data_received = self.ui.log_uart_rx
-
-    def read_serial_data(self):
-        line = self.serial_handler.read_line()
-        if line:
-            self.ui.log_uart_rx(line)
+    def update_rx_monitor(self):
+        """Polls the serial handler's queue and updates the UI."""
+        lines = self.serial_handler.get_all_received_lines()
+        if lines:
+            self.ui.log_uart_rx('\n'.join(lines))
 
     def refresh_all_devices(self):
         self.refresh_serial_ports(); self.refresh_gamepads()
@@ -93,8 +91,7 @@ class MainApplication:
             self.serial_handler.disconnect(); self.ui.serial_connect_btn.setText("Connect")
         else:
             port = self.ui.serial_select.currentData()
-            if port and self.serial_handler.connect(port):
-                self.ui.serial_connect_btn.setText("Disconnect")
+            if port and self.serial_handler.connect(port): self.ui.serial_connect_btn.setText("Disconnect")
             elif port: QMessageBox.critical(self.ui, "Connection Error", f"Failed to connect to {port}.")
 
     def update_serial_state(self, code, value):
@@ -116,7 +113,7 @@ class MainApplication:
         self.ui.show(); self.ds4_handler.start(); self.app.aboutToQuit.connect(self.cleanup); sys.exit(self.app.exec())
 
     def cleanup(self):
-        self.tx_timer.stop(); self.rx_timer.stop()
+        self.tx_timer.stop(); self.rx_monitor_timer.stop()
         self.ds4_handler.stop(); self.serial_handler.disconnect()
 
 if __name__ == '__main__':
