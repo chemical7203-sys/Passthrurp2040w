@@ -44,11 +44,16 @@ add_executable(RP
         usb_descriptors.c
         )
 
-# Add compile definition to enable TinyUSB HID class
+# Add compile definitions based on the selected output mode
 target_compile_definitions(RP PRIVATE
     CFG_TUD_HID=1
-    INPUT_MODE_${OUTPUT_MODE}=1
 )
+if (OUTPUT_MODE STREQUAL "SWITCH")
+    target_compile_definitions(RP PRIVATE CFG_TUD_HID_NINTENDO=1)
+elseif (OUTPUT_MODE STREQUAL "DS4")
+    target_compile_definitions(RP PRIVATE CFG_TUD_HID_SONY=1)
+endif()
+
 
 pico_set_program_name(RP "RP")
 pico_set_program_version(RP "0.1")
@@ -58,7 +63,7 @@ pico_generate_pio_header(RP ${CMAKE_CURRENT_LIST_DIR}/blink.pio)
 
 # Modify the below lines to enable/disable output over UART/USB
 pico_enable_stdio_uart(RP 1)
-pico_enable_stdio_usb(RP 0) # Disabled for HID-only device
+pico_enable_stdio_usb(RP 0)
 
 # Add the standard library to the build
 target_link_libraries(RP

@@ -1,9 +1,11 @@
 #include "tusb.h"
+#include "class/hid/hid_device.h"
 
 //--------------------------------------------------------------------+
 // Device Descriptors
 //--------------------------------------------------------------------+
-#if INPUT_MODE_SWITCH
+#if CFG_TUD_HID_NINTENDO
+// Switch Device Descriptor
 tusb_desc_device_t const desc_device = {
     .bLength = sizeof(tusb_desc_device_t), .bDescriptorType = TUSB_DESC_DEVICE, .bcdUSB = 0x0200,
     .bDeviceClass = 0x00, .bDeviceSubClass = 0x00, .bDeviceProtocol = 0x00,
@@ -12,12 +14,13 @@ tusb_desc_device_t const desc_device = {
     .iManufacturer = 0x01, .iProduct = 0x02, .iSerialNumber = 0x03,
     .bNumConfigurations = 0x01
 };
-#else // Default to Generic/DS4
+#else
+// Generic and DS4 Device Descriptor
 tusb_desc_device_t const desc_device = {
     .bLength = sizeof(tusb_desc_device_t), .bDescriptorType = TUSB_DESC_DEVICE, .bcdUSB = 0x0200,
     .bDeviceClass = 0x00, .bDeviceSubClass = 0x00, .bDeviceProtocol = 0x00,
     .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
-    .idVendor = 0x2E8A, .idProduct = (INPUT_MODE_DS4 ? 0x057E : 0xC003), .bcdDevice = 0x0100,
+    .idVendor = 0x2E8A, .idProduct = (CFG_TUD_HID_SONY ? 0x057E : 0xC003), .bcdDevice = 0x0100,
     .iManufacturer = 0x01, .iProduct = 0x02, .iSerialNumber = 0x03,
     .bNumConfigurations = 0x01
 };
@@ -28,14 +31,12 @@ uint8_t const * tud_descriptor_device_cb(void) { return (uint8_t const *) &desc_
 //--------------------------------------------------------------------+
 // HID Report Descriptors
 //--------------------------------------------------------------------+
-#if INPUT_MODE_SWITCH
-// Report Descriptor for Switch
+#if CFG_TUD_HID_NINTENDO
 uint8_t const desc_hid_report[] = { TUD_HID_REPORT_DESC_NINTENDO() };
-#elif INPUT_MODE_DS4
+#elif CFG_TUD_HID_SONY
 // TODO: Add DS4 descriptor
-uint8_t const desc_hid_report[] = { TUD_HID_REPORT_DESC_GAMEPAD() }; // Placeholder
+uint8_t const desc_hid_report[] = { TUD_HID_REPORT_DESC_DS4(1) }; // Placeholder for DS4
 #else // GENERIC
-// Report Descriptor for Generic
 uint8_t const desc_hid_report[] = { TUD_HID_REPORT_DESC_GAMEPAD(HID_REPORT_ID(1)) };
 #endif
 
@@ -58,9 +59,9 @@ uint8_t const * tud_descriptor_configuration_cb(uint8_t index) { (void) index; r
 //--------------------------------------------------------------------+
 const char* string_desc_arr [] = {
   (char[]){0x09, 0x04},
-#if INPUT_MODE_SWITCH
+#if CFG_TUD_HID_NINTENDO
   "Nintendo Co., Ltd.", "Pro Controller", "000000000001",
-#elif INPUT_MODE_DS4
+#elif CFG_TUD_HID_SONY
   "Sony Interactive Entertainment", "Wireless Controller", "000000000001",
 #else // GENERIC
   "JulesCorp", "Pico Gamepad", "123456",
