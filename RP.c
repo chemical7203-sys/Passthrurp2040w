@@ -6,6 +6,7 @@
 #include "hardware/uart.h"
 #include "tusb.h"
 #include "bsp/board.h"
+#include "class/hid/hid.h"
 #include "class/hid/hid_device.h"
 
 // Struct to hold the received v2 controller data from UART
@@ -24,7 +25,6 @@ static gamepad_data_v2_t gamepad_data;
 #define UART_RX_PIN 5
 
 void setup_uart() { uart_init(UART_ID, BAUD_RATE); gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART); gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART); }
-void process_uart() { /* ... UART processing logic remains the same ... */ }
 void process_uart() { static uint8_t pb[11]; static uint8_t idx=0; while(uart_is_readable(UART_ID)){ uint8_t ch=uart_getc(UART_ID); if(idx==0){if(ch==0xA6)pb[idx++]=ch;}else{pb[idx++]=ch; if(idx>=11){uint8_t cs=0;for(int i=0;i<10;i++)cs^=pb[i]; if(cs==pb[10]){memcpy(&gamepad_data,&pb[1],sizeof(gamepad_data));}idx=0;}}}}
 
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen) { return 0; }
