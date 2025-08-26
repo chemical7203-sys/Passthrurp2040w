@@ -1,6 +1,7 @@
 import threading
 import time
 import pygame
+import os
 
 class DS4Handler(threading.Thread):
     def __init__(self, signals):
@@ -22,6 +23,7 @@ class DS4Handler(threading.Thread):
 
     def run(self):
         print("Pygame handler thread started.")
+        os.environ['SDL_VIDEODRIVER'] = 'dummy'
         pygame.init()
         pygame.joystick.init()
 
