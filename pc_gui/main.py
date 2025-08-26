@@ -54,6 +54,7 @@ class MainApplication:
         self.gamepad_signals.button_event.connect(self.ui.gamepad_widget.update_button)
         self.gamepad_signals.trigger_event.connect(self.ui.gamepad_widget.update_trigger)
         self.gamepad_signals.gamepad_disconnected.connect(self.handle_gamepad_disconnect)
+        self.gamepad_signals.device_changed.connect(self.refresh_gamepads)
         self.gamepad_signals.raw_event.connect(self.ui.log_raw_event)
 
         self.gamepad_signals.stick_event.connect(self.update_serial_state)
@@ -81,6 +82,9 @@ class MainApplication:
 
     def select_gamepad(self, index):
         joystick_index = self.ui.gamepad_select.itemData(index)
+        if joystick_index is None:
+            self.ds4_handler.set_device(None)
+            return
         self.ds4_handler.set_device(joystick_index if joystick_index >= 0 else None)
 
     def handle_gamepad_disconnect(self):
