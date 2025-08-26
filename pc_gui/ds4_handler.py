@@ -38,7 +38,13 @@ class DS4Handler(threading.Thread):
                     self.joystick.init()
                     print(f"Listening to gamepad index: {self.joystick_index} ({self.joystick.get_name()})")
 
+                # --- Start Debug Logging ---
+                joystick_count = pygame.joystick.get_count()
+                print(f"DEBUG: Joystick count: {joystick_count}, Current index: {self.joystick_index}")
+                # --- End Debug Logging ---
+
                 for event in pygame.event.get():
+                    print(f"DEBUG: Pygame event: {event}") # Log every event
                     if not self._running: break
                     self._process_event(event)
                 time.sleep(0.01)
