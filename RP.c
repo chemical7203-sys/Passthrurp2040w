@@ -10,6 +10,9 @@
 
 #if CFG_TUD_HID_SONY
 #include "ds4_report.h"
+#elif CFG_TUD_HID_NINTENDO
+#include "switch_report.h"
+static hid_nintendo_report_t last_switch_report = {0};
 #endif
 
 // Struct to hold the received v2 controller data from UART
@@ -22,7 +25,9 @@ typedef struct __attribute__((packed)) {
 
 static gamepad_data_v2_t gamepad_data;
 static uint8_t report_counter = 0;
+#if CFG_TUD_HID_SONY
 static hid_ds4_report_t last_ds4_report = {0};
+#endif
 
 #define UART_ID uart1
 #define BAUD_RATE 115200
@@ -67,10 +72,16 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_t
   (void) instance;
   (void) report_id;
 
-  // For GET_REPORT requests, just return the last sent report
   if (report_type == HID_REPORT_TYPE_FEATURE) {
-    memcpy(buffer, &last_ds4_report, sizeof(last_ds4_report));
-    return sizeof(last_ds4_report);
+    #if CFG_TUD_HID_SONY
+      memcpy(buffer, &last_ds4_report, sizeof(last_ds4_report));
+      return sizeof(last_ds4_report);
+    #elif CFG_TUD_HID_NINTENDO
+      memcpy(buffer, &last_switch_report, sizeof(last_switch_report));
+      return sizeof(last_switch_report);
+    #else
+      return 0;
+    #endif
   }
 
   return 0;
@@ -93,8 +104,8 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
 uint8_t dpad_to_switch_hat(uint8_t dpad_mask) {
     static const uint8_t hat_map[16] = {
         SWITCH_HAT_NOTHING, SWITCH_HAT_UP, SWITCH_HAT_DOWN, SWITCH_HAT_NOTHING,
-        SWITCH_HAT_LEFT, SWITCH_HAT_UP_LEFT, SWITCH_HAT_DOWN_LEFT, SWITCH_HAT_NOTHING,
-        SWITCH_HAT_RIGHT, SWITCH_HAT_UP_RIGHT, SWITCH_HAT_DOWN_RIGHT, SWITCH_HAT_NOTHING,
+        SWITCH_HAT_LEFT, SWITCH_HAT_UPLEFT, SWITCH_HAT_DOWNLEFT, SWITCH_HAT_NOTHING,
+        SWITCH_HAT_RIGHT, SWITCH_HAT_UPRIGHT, SWITCH_HAT_DOWNRIGHT, SWITCH_HAT_NOTHING,
         SWITCH_HAT_NOTHING, SWITCH_HAT_NOTHING, SWITCH_HAT_NOTHING, SWITCH_HAT_NOTHING
     };
     return hat_map[dpad_mask & 0x0F];
@@ -126,16 +137,34 @@ bool hid_task(void) {
 
   if ( tud_hid_ready() ) {
     #if CFG_TUD_HID_NINTENDO
-      hid_nintendo_report_t report = {0};
-      report.hat = dpad_to_switch_hat(gamepad_data.dpad);
-      report.lx = gamepad_data.lx + 128;
-      report.ly = gamepad_data.ly + 128;
-      report.rx = gamepad_data.rx + 128;
-      report.ry = gamepad_data.ry + 128;
-      // TODO: Full button mapping for Switch
-      if (gamepad_data.buttons & (1<<0)) report.buttons |= SWITCH_MASK_B;
-      if (gamepad_data.buttons & (1<<1)) report.buttons |= SWITCH_MASK_A;
-      return tud_hid_report(0, &report, sizeof(report));
+      memset(&last_switch_report, 0, sizeof(last_switch_report));
+
+      // Button mapping
+      if (gamepad_data.buttons & (1 << 1)) last_switch_report.buttons |= SWITCH_MASK_A;
+      if (gamepad_data.buttons & (1 << 0)) last_switch_report.buttons |= SWITCH_MASK_B;
+      if (gamepad_data.buttons & (1 << 3)) last_switch_report.buttons |= SWITCH_MASK_X;
+      if (gamepad_data.buttons & (1 << 2)) last_switch_report.buttons |= SWITCH_MASK_Y;
+      if (gamepad_data.buttons & (1 << 4)) last_switch_report.buttons |= SWITCH_MASK_L;
+      if (gamepad_data.buttons & (1 << 5)) last_switch_report.buttons |= SWITCH_MASK_R;
+      if (gamepad_data.buttons & (1 << 6)) last_switch_report.buttons |= SWITCH_MASK_ZL;
+      if (gamepad_data.buttons & (1 << 7)) last_switch_report.buttons |= SWITCH_MASK_ZR;
+      if (gamepad_data.buttons & (1 << 8)) last_switch_report.buttons |= SWITCH_MASK_MINUS;
+      if (gamepad_data.buttons & (1 << 9)) last_switch_report.buttons |= SWITCH_MASK_PLUS;
+      if (gamepad_data.buttons & (1 << 10)) last_switch_report.buttons |= SWITCH_MASK_L3;
+      if (gamepad_data.buttons & (1 << 11)) last_switch_report.buttons |= SWITCH_MASK_R3;
+      if (gamepad_data.buttons & (1 << 12)) last_switch_report.buttons |= SWITCH_MASK_HOME;
+      if (gamepad_data.buttons & (1 << 13)) last_switch_report.buttons |= SWITCH_MASK_CAPTURE;
+
+      // D-pad
+      last_switch_report.hat = dpad_to_switch_hat(gamepad_data.dpad);
+
+      // Analog sticks
+      last_switch_report.lx = (uint16_t)(((int32_t)gamepad_data.lx * 128) + 32768);
+      last_switch_report.ly = (uint16_t)(((int32_t)gamepad_data.ly * 128) + 32768);
+      last_switch_report.rx = (uint16_t)(((int32_t)gamepad_data.rx * 128) + 32768);
+      last_switch_report.ry = (uint16_t)(((int32_t)gamepad_data.ry * 128) + 32768);
+
+      return tud_hid_report(0, &last_switch_report, sizeof(last_switch_report));
     #elif CFG_TUD_HID_SONY
       memset(&last_ds4_report, 0, sizeof(last_ds4_report));
       last_ds4_report.report_id = 1;
