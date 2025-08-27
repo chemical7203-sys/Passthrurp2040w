@@ -14,6 +14,7 @@ class GamepadSignals(QObject):
     button_event = pyqtSignal(str, bool)
     gamepad_disconnected = pyqtSignal()
     device_changed = pyqtSignal()
+    gamepad_list_updated = pyqtSignal(list)
     raw_event = pyqtSignal(str)
 
 # --- Gamepad Graphics Widget ---

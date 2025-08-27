@@ -4,7 +4,7 @@ from PyQt6.QtCore import QTimer
 from gamepad_ui import GamepadUI, GamepadSignals
 from ds4_handler import DS4Handler
 from serial_handler import SerialHandler
-from device_manager import get_available_gamepads, get_available_serial_ports
+# device_manager is no longer needed
 from queue import Queue
 
 class MainApplication:
@@ -18,25 +18,21 @@ class MainApplication:
         self.serial_handler = SerialHandler()
 
         self.serial_state = {
-            'buttons': 0, 'dpad': 0,
-            'lx': 0, 'ly': 0, 'rx': 0, 'ry': 0,
-            'l2': 0, 'r2': 0,
+            'buttons': 0, 'dpad': 0, 'lx': 0, 'ly': 0, 'rx': 0, 'ry': 0, 'l2': 0, 'r2': 0,
         }
         self.button_map = {
-            'BTN_SOUTH':  ( 'buttons', 1<<0 ), 'BTN_EAST':   ( 'buttons', 1<<1 ),
-            'BTN_WEST':   ( 'buttons', 1<<2 ), 'BTN_NORTH':  ( 'buttons', 1<<3 ),
-            'BTN_TL':     ( 'buttons', 1<<4 ), 'BTN_TR':     ( 'buttons', 1<<5 ),
-            'BTN_TL2':    ( 'buttons', 1<<6 ), 'BTN_TR2':    ( 'buttons', 1<<7 ),
-            'BTN_SELECT': ( 'buttons', 1<<8 ), 'BTN_START':  ( 'buttons', 1<<9 ),
-            'BTN_THUMBL': ( 'buttons', 1<<10), 'BTN_THUMBR': ( 'buttons', 1<<11),
-            'BTN_MODE':   ( 'buttons', 1<<12),
-            'DPAD_UP':    ( 'dpad', 1<<0 ), 'DPAD_DOWN':  ( 'dpad', 1<<1 ),
-            'DPAD_LEFT':  ( 'dpad', 1<<2 ), 'DPAD_RIGHT': ( 'dpad', 1<<3 ),
+            'BTN_SOUTH': ('buttons', 1<<0), 'BTN_EAST': ('buttons', 1<<1),
+            'BTN_WEST': ('buttons', 1<<2), 'BTN_NORTH': ('buttons', 1<<3),
+            'BTN_TL': ('buttons', 1<<4), 'BTN_TR': ('buttons', 1<<5),
+            'BTN_TL2': ('buttons', 1<<6), 'BTN_TR2': ('buttons', 1<<7),
+            'BTN_SELECT': ('buttons', 1<<8), 'BTN_START': ('buttons', 1<<9),
+            'BTN_THUMBL': ('buttons', 1<<10), 'BTN_THUMBR': ('buttons', 1<<11),
+            'BTN_MODE': ('buttons', 1<<12),
+            'DPAD_UP': ('dpad', 1<<0), 'DPAD_DOWN': ('dpad', 1<<1),
+            'DPAD_LEFT': ('dpad', 1<<2), 'DPAD_RIGHT': ('dpad', 1<<3),
         }
 
-        self.gamepads = []
         self.connect_signals()
-
         self.ds4_handler.start()
         self.refresh_all_devices()
 
@@ -59,6 +55,7 @@ class MainApplication:
         self.gamepad_signals.trigger_event.connect(self.ui.gamepad_widget.update_trigger)
         self.gamepad_signals.gamepad_disconnected.connect(self.handle_gamepad_disconnect)
         self.gamepad_signals.device_changed.connect(self.refresh_gamepads)
+        self.gamepad_signals.gamepad_list_updated.connect(self.on_gamepad_list_updated)
         self.gamepad_signals.raw_event.connect(self.ui.log_raw_event)
 
         self.gamepad_signals.stick_event.connect(self.update_serial_state)
@@ -75,21 +72,26 @@ class MainApplication:
         self.refresh_gamepads()
 
     def refresh_serial_ports(self):
+        # This function does not interact with Pygame, so it's safe.
+        from device_manager import get_available_serial_ports
         self.ui.serial_select.clear()
         ports = get_available_serial_ports()
         self.ui.serial_select.addItem("Select a port...", None)
         for port in ports: self.ui.serial_select.addItem(f"{port.device}", port.device)
 
     def refresh_gamepads(self):
+        """Sends a command to the handler thread to refresh the device list."""
+        self.command_queue.put({'type': 'REFRESH_DEVICES'})
+
+    def on_gamepad_list_updated(self, gamepads):
+        """Receives the new gamepad list from the handler and updates the UI."""
         current_selection = self.ui.gamepad_select.currentData()
         self.ui.gamepad_select.blockSignals(True)
         self.ui.gamepad_select.clear()
-
-        self.gamepads = get_available_gamepads()
         self.ui.gamepad_select.addItem("Select a gamepad...", None)
 
         found_current = False
-        for i, gamepad in enumerate(self.gamepads):
+        for i, gamepad in enumerate(gamepads):
             self.ui.gamepad_select.addItem(gamepad['name'], gamepad['index'])
             if gamepad['index'] == current_selection:
                 self.ui.gamepad_select.setCurrentIndex(i + 1)
@@ -112,14 +114,11 @@ class MainApplication:
 
     def toggle_serial_connection(self):
         if self.serial_handler.ser and self.serial_handler.ser.is_open:
-            self.serial_handler.disconnect()
-            self.ui.serial_connect_btn.setText("Connect")
+            self.serial_handler.disconnect(); self.ui.serial_connect_btn.setText("Connect")
         else:
             port = self.ui.serial_select.currentData()
-            if port and self.serial_handler.connect(port):
-                self.ui.serial_connect_btn.setText("Disconnect")
-            elif port:
-                QMessageBox.critical(self.ui, "Connection Error", f"Failed to connect to {port}.")
+            if port and self.serial_handler.connect(port): self.ui.serial_connect_btn.setText("Disconnect")
+            elif port: QMessageBox.critical(self.ui, "Connection Error", f"Failed to connect to {port}.")
 
     def update_serial_state(self, code, value):
         if code == 'ABS_X': self.serial_state['lx'] = int(value * 127)

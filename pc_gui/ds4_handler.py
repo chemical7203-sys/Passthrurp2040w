@@ -13,7 +13,6 @@ class DS4Handler(threading.Thread):
         self.joystick = None
 
     def _initialize_pygame(self):
-        """Initializes Pygame and its subsystems. Must be called from the thread."""
         try:
             os.environ['SDL_VIDEODRIVER'] = 'dummy'
             pygame.init()
@@ -24,34 +23,39 @@ class DS4Handler(threading.Thread):
             return False
 
     def _set_device(self, joystick_index):
-        """Sets or clears the active joystick device. Must be called from within the thread."""
         if self.joystick:
-            try:
-                self.joystick.quit()
-            except pygame.error as e:
-                print(f"ERROR: DS4Handler: Pygame error while quitting joystick: {e}")
-            finally:
-                self.joystick = None
+            self.joystick.quit()
+            self.joystick = None
 
         if joystick_index is not None:
             try:
-                if pygame.joystick.get_count() > joystick_index:
-                    self.joystick = pygame.joystick.Joystick(joystick_index)
-                    self.joystick.init()
-                else:
-                    self.signals.gamepad_disconnected.emit()
+                self.joystick = pygame.joystick.Joystick(joystick_index)
+                self.joystick.init()
             except pygame.error as e:
-                print(f"ERROR: DS4Handler: Pygame error while setting device: {e}")
                 self.joystick = None
                 self.signals.gamepad_disconnected.emit()
 
+    def _refresh_devices(self):
+        """Scans for gamepads and emits a signal with the list."""
+        pygame.joystick.quit()
+        pygame.joystick.init()
+
+        gamepads = []
+        for i in range(pygame.joystick.get_count()):
+            try:
+                joystick = pygame.joystick.Joystick(i)
+                joystick.init()
+                gamepads.append({'name': joystick.get_name(), 'index': i})
+                joystick.quit() # Quit immediately after getting info
+            except pygame.error:
+                continue # Skip devices that can't be opened
+
+        self.signals.gamepad_list_updated.emit(gamepads)
+
     def _handle_events(self):
-        """Polls and processes all Pygame events. Must be called from the thread."""
         try:
             for event in pygame.event.get():
                 if event.type == pygame.JOYDEVICEADDED or event.type == pygame.JOYDEVICEREMOVED:
-                    # Simply signal the main thread that the device list has changed.
-                    # Do NOT modify any pygame state from within the event loop.
                     self.signals.device_changed.emit()
                     return
 
@@ -63,7 +67,6 @@ class DS4Handler(threading.Thread):
             self.signals.gamepad_disconnected.emit()
 
     def run(self):
-        """The main loop for the thread."""
         if not self._initialize_pygame():
             return
 
@@ -75,6 +78,8 @@ class DS4Handler(threading.Thread):
 
                 if cmd_type == 'SET_DEVICE':
                     self._set_device(command.get('index'))
+                elif cmd_type == 'REFRESH_DEVICES':
+                    self._refresh_devices()
                 elif cmd_type == 'STOP':
                     running = False
             except Empty:
@@ -88,21 +93,17 @@ class DS4Handler(threading.Thread):
         pygame.quit()
 
     def _process_game_event(self, event):
-        """Processes a single joystick input event."""
         self.signals.raw_event.emit(str(event))
-
         if event.type == pygame.JOYAXISMOTION:
             axis_map = {0: 'ABS_X', 1: 'ABS_Y', 2: 'ABS_RX', 3: 'ABS_RY', 4: 'ABS_Z', 5: 'ABS_RZ'}
             if event.axis in axis_map:
                 if event.axis in [4, 5]: self.signals.trigger_event.emit(axis_map[event.axis], event.value)
                 else: self.signals.stick_event.emit(axis_map[event.axis], event.value)
-
         elif event.type == pygame.JOYBUTTONDOWN or event.type == pygame.JOYBUTTONUP:
             pressed = (event.type == pygame.JOYBUTTONDOWN)
             button_map = {
                 0: 'BTN_SOUTH', 1: 'BTN_EAST', 2: 'BTN_WEST', 3: 'BTN_NORTH',
-                9: 'BTN_TL', 10: 'BTN_TR',
-                7: 'BTN_THUMBL', 8: 'BTN_THUMBR',
+                9: 'BTN_TL', 10: 'BTN_TR', 7: 'BTN_THUMBL', 8: 'BTN_THUMBR',
                 11: 'DPAD_UP', 12: 'DPAD_DOWN', 13: 'DPAD_LEFT', 14: 'DPAD_RIGHT',
                 6: 'BTN_START', 4: 'BTN_SELECT', 5: 'BTN_MODE'
             }
