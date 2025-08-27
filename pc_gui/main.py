@@ -5,13 +5,16 @@ from gamepad_ui import GamepadUI, GamepadSignals
 from ds4_handler import DS4Handler
 from serial_handler import SerialHandler
 from device_manager import get_available_gamepads, get_available_serial_ports
+from queue import Queue
 
 class MainApplication:
     def __init__(self):
         self.app = QApplication(sys.argv)
         self.ui = GamepadUI()
         self.gamepad_signals = GamepadSignals()
-        self.ds4_handler = DS4Handler(self.gamepad_signals)
+
+        self.command_queue = Queue()
+        self.ds4_handler = DS4Handler(self.gamepad_signals, self.command_queue)
         self.serial_handler = SerialHandler()
 
         self.serial_state = {
@@ -23,9 +26,9 @@ class MainApplication:
             'BTN_SOUTH':  ( 'buttons', 1<<0 ), 'BTN_EAST':   ( 'buttons', 1<<1 ),
             'BTN_WEST':   ( 'buttons', 1<<2 ), 'BTN_NORTH':  ( 'buttons', 1<<3 ),
             'BTN_TL':     ( 'buttons', 1<<4 ), 'BTN_TR':     ( 'buttons', 1<<5 ),
-            'BTN_SELECT': ( 'buttons', 1<<6 ), 'BTN_START':  ( 'buttons', 1<<7 ),
-            'BTN_THUMBL': ( 'buttons', 1<<8 ), 'BTN_THUMBR': ( 'buttons', 1<<9 ),
-            'BTN_MODE':   ( 'buttons', 1<<10), # PS Button
+            'BTN_SELECT': ( 'buttons', 1<<8 ), 'BTN_START':  ( 'buttons', 1<<9 ), # Swapped based on common DS4 layout
+            'BTN_THUMBL': ( 'buttons', 1<<10 ), 'BTN_THUMBR': ( 'buttons', 1<<11 ),
+            'BTN_MODE':   ( 'buttons', 1<<12), # PS Button
             'DPAD_UP':    ( 'dpad', 1<<0 ), 'DPAD_DOWN':  ( 'dpad', 1<<1 ),
             'DPAD_LEFT':  ( 'dpad', 1<<2 ), 'DPAD_RIGHT': ( 'dpad', 1<<3 ),
         }
@@ -76,19 +79,19 @@ class MainApplication:
         for port in ports: self.ui.serial_select.addItem(f"{port.device}", port.device)
 
     def refresh_gamepads(self):
+        print("DEBUG: Refreshing gamepads...")
         self.ui.gamepad_select.clear(); self.gamepads = get_available_gamepads()
-        self.ui.gamepad_select.addItem("Select a gamepad...", -1)
+        self.ui.gamepad_select.addItem("Select a gamepad...", None)
         for gamepad in self.gamepads: self.ui.gamepad_select.addItem(gamepad['name'], gamepad['index'])
 
     def select_gamepad(self, index):
         joystick_index = self.ui.gamepad_select.itemData(index)
-        if joystick_index is None:
-            self.ds4_handler.set_device(None)
-            return
-        self.ds4_handler.set_device(joystick_index if joystick_index >= 0 else None)
+        command = {'type': 'SET_DEVICE', 'index': joystick_index}
+        print(f"DEBUG: Putting command to queue: {command}")
+        self.command_queue.put(command)
 
     def handle_gamepad_disconnect(self):
-        QMessageBox.warning(self.ui, "Gamepad Disconnected", "Connection lost.")
+        QMessageBox.warning(self.ui, "Gamepad Disconnected", "Connection to the current gamepad was lost.")
         self.refresh_gamepads()
 
     def toggle_serial_connection(self):
@@ -115,11 +118,18 @@ class MainApplication:
         self.serial_handler.send_gamepad_state_v2(self.serial_state)
 
     def run(self):
-        self.ui.show(); self.ds4_handler.start(); self.app.aboutToQuit.connect(self.cleanup); sys.exit(self.app.exec())
+        self.ui.show()
+        self.ds4_handler.start()
+        self.app.aboutToQuit.connect(self.cleanup)
+        sys.exit(self.app.exec())
 
     def cleanup(self):
-        self.tx_timer.stop(); self.rx_monitor_timer.stop()
-        self.ds4_handler.stop(); self.serial_handler.disconnect()
+        print("DEBUG: Cleanup called. Sending STOP command to handler.")
+        self.tx_timer.stop()
+        self.rx_monitor_timer.stop()
+        self.command_queue.put({'type': 'STOP'})
+        self.ds4_handler.join() # Wait for the thread to finish
+        self.serial_handler.disconnect()
 
 if __name__ == '__main__':
     main_app = MainApplication()
