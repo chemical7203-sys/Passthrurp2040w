@@ -3,6 +3,7 @@
 #include <string.h>
 #include "pico/stdlib.h"
 #include "pico/time.h"
+#include "pico/cyw43_arch.h"
 #include "hardware/uart.h"
 #include "tusb.h"
 #include "bsp/board.h"
@@ -192,9 +193,18 @@ int main() {
     board_init();
     setup_uart();
     tusb_init();
+
+    if (cyw43_arch_init()) {
+        printf("Wi-Fi init failed");
+        return -1;
+    }
+
     while (true) {
         printf("Hello from RP2040!\n");
-        sleep_ms(1000);
+        cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
+        sleep_ms(500);
+        cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
+        sleep_ms(500);
         tud_task();
         hid_task();
         process_uart();
