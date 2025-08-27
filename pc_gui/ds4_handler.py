@@ -41,6 +41,7 @@ class DS4Handler(threading.Thread):
                 else:
                     self.signals.gamepad_disconnected.emit()
             except pygame.error as e:
+                print(f"ERROR: DS4Handler: Pygame error while setting device: {e}")
                 self.joystick = None
                 self.signals.gamepad_disconnected.emit()
 
