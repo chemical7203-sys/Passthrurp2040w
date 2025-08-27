@@ -82,9 +82,13 @@ class DS4Handler(threading.Thread):
             for event in pygame.event.get():
                 if event.type == pygame.JOYDEVICEADDED or event.type == pygame.JOYDEVICEREMOVED:
                     print(f"DEBUG: DS4Handler: Hot-plug event detected: {event}. Signaling main thread to refresh.")
-                    self.joystick = None
+                    # Only invalidate the current joystick if it's the one that was removed.
+                    if self.joystick and event.type == pygame.JOYDEVICEREMOVED and event.instance_id == self.joystick.get_instance_id():
+                        print(f"DEBUG: DS4Handler: Currently active joystick (instance_id={event.instance_id}) was removed.")
+                        self.joystick = None
+                    # Always tell the UI to refresh its list.
                     self.signals.device_changed.emit()
-                    return
+                    continue # Continue processing other events or next loop iteration
 
                 if self.joystick and self.joystick.get_init():
                     if hasattr(event, 'instance_id') and event.instance_id == self.joystick.get_instance_id():
