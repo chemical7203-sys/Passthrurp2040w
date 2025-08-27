@@ -61,7 +61,7 @@ class SerialHandler:
                 break
             except Exception as e:
                 # This can happen if a non-utf8 character is received
-                pass
+                print(f"ERROR: Serial read loop exception: {e}")
             time.sleep(0.001) # Small sleep to yield CPU
 
     def get_all_received_lines(self):
