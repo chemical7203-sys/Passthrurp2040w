@@ -57,13 +57,16 @@ class DS4Handler(threading.Thread):
         self.signals.raw_event.emit(str(event))
 
         if event.type == pygame.JOYDEVICEADDED or event.type == pygame.JOYDEVICEREMOVED:
-            print("DEBUG: Device change detected, emitting signal.")
+            print("DEBUG: Device change detected. Re-initializing joystick subsystem.")
+            # Force re-initialization of the joystick subsystem
+            pygame.joystick.quit()
+            pygame.joystick.init()
+
             self.signals.device_changed.emit()
-            # Stop trying to use the current joystick, it might be invalid
-            if self.joystick:
-                self.joystick.quit()
+
+            # Invalidate current joystick
             self.joystick = None
-            self.joystick_index = None # Force re-selection
+            self.joystick_index = None
             return
 
         if event.type == pygame.JOYAXISMOTION:
