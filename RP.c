@@ -10,9 +10,6 @@
 
 #if CFG_TUD_HID_SONY
 #include "ds4_report.h"
-#elif CFG_TUD_HID_NINTENDO
-#include "switch_report.h"
-static hid_nintendo_report_t last_switch_report = {0};
 #endif
 
 // Struct to hold the received v2 controller data from UART
@@ -25,8 +22,35 @@ typedef struct __attribute__((packed)) {
 
 static gamepad_data_v2_t gamepad_data;
 static uint8_t report_counter = 0;
+
 #if CFG_TUD_HID_SONY
-static hid_ds4_report_t last_ds4_report = {0};
+// Copied from GP2040-CE PS4Driver.cpp for Feature Reports
+static const uint8_t output_0x02[] = {
+    0xfe, 0xff, 0x0e, 0x00, 0x04, 0x00, 0xd4, 0x22,
+    0x2a, 0xdd, 0xbb, 0x22, 0x5e, 0xdd, 0x81, 0x22,
+    0x84, 0xdd, 0x1c, 0x02, 0x1c, 0x02, 0x85, 0x1f,
+    0xb0, 0xe0, 0xc6, 0x20, 0xb5, 0xe0, 0xb1, 0x20,
+    0x83, 0xdf, 0x0c, 0x00
+};
+
+// Use for normal controller support.
+static const uint8_t output_0x03[] = {
+   0x21, 0x27, 0x04, 0xcf, 0x00, 0x2c, 0x56,
+   0x08, 0x00, 0x3d, 0x00, 0xe8, 0x03, 0x04, 0x00,
+   0xff, 0x7f, 0x0d, 0x0d, 0x00, 0x00, 0x00, 0x00,
+   0x0D, 0x84, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00,
+   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
+static const uint8_t output_0xa3[] = {
+    0x4a, 0x75, 0x6e, 0x20, 0x20, 0x39, 0x20, 0x32,
+    0x30, 0x31, 0x37, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x31, 0x32, 0x3a, 0x33, 0x36, 0x3a, 0x34, 0x31,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x01, 0x08, 0xb4, 0x01, 0x00, 0x00, 0x00,
+    0x07, 0xa0, 0x10, 0x20, 0x00, 0xa0, 0x02, 0x00
+};
 #endif
 
 #define UART_ID uart1
@@ -69,22 +93,33 @@ void process_uart() {
 // Application must fill buffer report's content and return its length.
 // Return zero will cause the stack to STALL request
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen) {
-  (void) instance;
-  (void) report_id;
+    (void) instance;
+    (void) reqlen;
 
-  if (report_type == HID_REPORT_TYPE_FEATURE) {
     #if CFG_TUD_HID_SONY
-      memcpy(buffer, &last_ds4_report, sizeof(last_ds4_report));
-      return sizeof(last_ds4_report);
-    #elif CFG_TUD_HID_NINTENDO
-      memcpy(buffer, &last_switch_report, sizeof(last_switch_report));
-      return sizeof(last_switch_report);
-    #else
-      return 0;
+    if (report_type == HID_REPORT_TYPE_FEATURE) {
+        uint16_t responseLen = 0;
+        switch(report_id) {
+            case 0x02: // Get Calibration
+                responseLen = sizeof(output_0x02);
+                memcpy(buffer, output_0x02, responseLen);
+                return responseLen;
+            case 0x03: // Get Definition
+                responseLen = sizeof(output_0x03);
+                memcpy(buffer, output_0x03, responseLen);
+                return responseLen;
+            case 0xA3: // Get Version and Date
+                responseLen = sizeof(output_0xa3);
+                memcpy(buffer, output_0xa3, responseLen);
+                return responseLen;
+            default:
+                // Stall unhandled feature reports
+                return 0;
+        }
+    }
     #endif
-  }
 
-  return 0;
+    return 0;
 }
 
 // Invoked when received SET_REPORT control request or
@@ -104,8 +139,8 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
 uint8_t dpad_to_switch_hat(uint8_t dpad_mask) {
     static const uint8_t hat_map[16] = {
         SWITCH_HAT_NOTHING, SWITCH_HAT_UP, SWITCH_HAT_DOWN, SWITCH_HAT_NOTHING,
-        SWITCH_HAT_LEFT, SWITCH_HAT_UPLEFT, SWITCH_HAT_DOWNLEFT, SWITCH_HAT_NOTHING,
-        SWITCH_HAT_RIGHT, SWITCH_HAT_UPRIGHT, SWITCH_HAT_DOWNRIGHT, SWITCH_HAT_NOTHING,
+        SWITCH_HAT_LEFT, SWITCH_HAT_UP_LEFT, SWITCH_HAT_DOWN_LEFT, SWITCH_HAT_NOTHING,
+        SWITCH_HAT_RIGHT, SWITCH_HAT_UP_RIGHT, SWITCH_HAT_DOWN_RIGHT, SWITCH_HAT_NOTHING,
         SWITCH_HAT_NOTHING, SWITCH_HAT_NOTHING, SWITCH_HAT_NOTHING, SWITCH_HAT_NOTHING
     };
     return hat_map[dpad_mask & 0x0F];
@@ -127,85 +162,67 @@ uint8_t dpad_to_generic_hat(uint8_t dpad_mask) {
 }
 #endif
 
-bool hid_task(void) {
+void hid_task(void) {
   const uint32_t interval_ms = 5;
   static uint32_t start_ms = 0;
-  if ( board_millis() - start_ms < interval_ms) return false;
+  if ( board_millis() - start_ms < interval_ms) return;
   start_ms += interval_ms;
 
   if ( tud_suspended() ) tud_remote_wakeup();
 
   if ( tud_hid_ready() ) {
     #if CFG_TUD_HID_NINTENDO
-      memset(&last_switch_report, 0, sizeof(last_switch_report));
-
-      // Button mapping
-      if (gamepad_data.buttons & (1 << 1)) last_switch_report.buttons |= SWITCH_MASK_A;
-      if (gamepad_data.buttons & (1 << 0)) last_switch_report.buttons |= SWITCH_MASK_B;
-      if (gamepad_data.buttons & (1 << 3)) last_switch_report.buttons |= SWITCH_MASK_X;
-      if (gamepad_data.buttons & (1 << 2)) last_switch_report.buttons |= SWITCH_MASK_Y;
-      if (gamepad_data.buttons & (1 << 4)) last_switch_report.buttons |= SWITCH_MASK_L;
-      if (gamepad_data.buttons & (1 << 5)) last_switch_report.buttons |= SWITCH_MASK_R;
-      if (gamepad_data.buttons & (1 << 6)) last_switch_report.buttons |= SWITCH_MASK_ZL;
-      if (gamepad_data.buttons & (1 << 7)) last_switch_report.buttons |= SWITCH_MASK_ZR;
-      if (gamepad_data.buttons & (1 << 8)) last_switch_report.buttons |= SWITCH_MASK_MINUS;
-      if (gamepad_data.buttons & (1 << 9)) last_switch_report.buttons |= SWITCH_MASK_PLUS;
-      if (gamepad_data.buttons & (1 << 10)) last_switch_report.buttons |= SWITCH_MASK_L3;
-      if (gamepad_data.buttons & (1 << 11)) last_switch_report.buttons |= SWITCH_MASK_R3;
-      if (gamepad_data.buttons & (1 << 12)) last_switch_report.buttons |= SWITCH_MASK_HOME;
-      if (gamepad_data.buttons & (1 << 13)) last_switch_report.buttons |= SWITCH_MASK_CAPTURE;
-
-      // D-pad
-      last_switch_report.hat = dpad_to_switch_hat(gamepad_data.dpad);
-
-      // Analog sticks
-      last_switch_report.lx = (uint16_t)(((int32_t)gamepad_data.lx * 128) + 32768);
-      last_switch_report.ly = (uint16_t)(((int32_t)gamepad_data.ly * 128) + 32768);
-      last_switch_report.rx = (uint16_t)(((int32_t)gamepad_data.rx * 128) + 32768);
-      last_switch_report.ry = (uint16_t)(((int32_t)gamepad_data.ry * 128) + 32768);
-
-      return tud_hid_report(0, &last_switch_report, sizeof(last_switch_report));
+      hid_nintendo_report_t report = {0};
+      report.hat = dpad_to_switch_hat(gamepad_data.dpad);
+      report.lx = gamepad_data.lx + 128;
+      report.ly = gamepad_data.ly + 128;
+      report.rx = gamepad_data.rx + 128;
+      report.ry = gamepad_data.ry + 128;
+      // TODO: Full button mapping for Switch
+      if (gamepad_data.buttons & (1<<0)) report.buttons |= SWITCH_MASK_B;
+      if (gamepad_data.buttons & (1<<1)) report.buttons |= SWITCH_MASK_A;
+      tud_hid_report(0, &report, sizeof(report));
     #elif CFG_TUD_HID_SONY
-      memset(&last_ds4_report, 0, sizeof(last_ds4_report));
-      last_ds4_report.report_id = 1;
-      last_ds4_report.left_stick_x = gamepad_data.lx + 128;
-      last_ds4_report.left_stick_y = gamepad_data.ly + 128;
-      last_ds4_report.right_stick_x = gamepad_data.rx + 128;
-      last_ds4_report.right_stick_y = gamepad_data.ry + 128;
-      last_ds4_report.l2_trigger = gamepad_data.l2;
-      last_ds4_report.r2_trigger = gamepad_data.r2;
-      last_ds4_report.dpad = dpad_to_ds4_hat(gamepad_data.dpad);
+      hid_ds4_report_t report = {0};
+      report.report_id = 1;
+      report.left_stick_x = gamepad_data.lx + 128;
+      report.left_stick_y = gamepad_data.ly + 128;
+      report.right_stick_x = gamepad_data.rx + 128;
+      report.right_stick_y = gamepad_data.ry + 128;
+      report.l2_trigger = gamepad_data.l2;
+      report.r2_trigger = gamepad_data.r2;
+      report.dpad = dpad_to_ds4_hat(gamepad_data.dpad);
 
-      if (gamepad_data.buttons & (1 << 0))  last_ds4_report.square = 1;
-      if (gamepad_data.buttons & (1 << 1))  last_ds4_report.cross = 1;
-      if (gamepad_data.buttons & (1 << 2))  last_ds4_report.circle = 1;
-      if (gamepad_data.buttons & (1 << 3))  last_ds4_report.triangle = 1;
-      if (gamepad_data.buttons & (1 << 4))  last_ds4_report.l1 = 1;
-      if (gamepad_data.buttons & (1 << 5))  last_ds4_report.r1 = 1;
-      if (gamepad_data.buttons & (1 << 6))  last_ds4_report.l2 = 1;
-      if (gamepad_data.buttons & (1 << 7))  last_ds4_report.r2 = 1;
-      if (gamepad_data.buttons & (1 << 8))  last_ds4_report.share = 1;
-      if (gamepad_data.buttons & (1 << 9))  last_ds4_report.options = 1;
-      if (gamepad_data.buttons & (1 << 10)) last_ds4_report.l3 = 1;
-      if (gamepad_data.buttons & (1 << 11)) last_ds4_report.r3 = 1;
-      if (gamepad_data.buttons & (1 << 12)) last_ds4_report.ps = 1;
-      if (gamepad_data.buttons & (1 << 13)) last_ds4_report.tpad = 1;
+      if (gamepad_data.buttons & (1 << 0))  report.square = 1;
+      if (gamepad_data.buttons & (1 << 1))  report.cross = 1;
+      if (gamepad_data.buttons & (1 << 2))  report.circle = 1;
+      if (gamepad_data.buttons & (1 << 3))  report.triangle = 1;
+      if (gamepad_data.buttons & (1 << 4))  report.l1 = 1;
+      if (gamepad_data.buttons & (1 << 5))  report.r1 = 1;
+      if (gamepad_data.buttons & (1 << 6))  report.l2 = 1;
+      if (gamepad_data.buttons & (1 << 7))  report.r2 = 1;
+      if (gamepad_data.buttons & (1 << 8))  report.share = 1;
+      if (gamepad_data.buttons & (1 << 9))  report.options = 1;
+      if (gamepad_data.buttons & (1 << 10)) report.l3 = 1;
+      if (gamepad_data.buttons & (1 << 11)) report.r3 = 1;
+      if (gamepad_data.buttons & (1 << 12)) report.ps = 1;
+      if (gamepad_data.buttons & (1 << 13)) report.tpad = 1;
 
-      last_ds4_report.report_counter = report_counter++;
+      report.report_counter = report_counter++;
 
       // Gyro and accelerometer data - set to zero as not provided by UART
-      last_ds4_report.accel_x = 0;
-      last_ds4_report.accel_y = 0;
-      last_ds4_report.accel_z = 0;
-      last_ds4_report.gyro_x = 0;
-      last_ds4_report.gyro_y = 0;
-      last_ds4_report.gyro_z = 0;
+      report.accel_x = 0;
+      report.accel_y = 0;
+      report.accel_z = 0;
+      report.gyro_x = 0;
+      report.gyro_y = 0;
+      report.gyro_z = 0;
 
       // Touchpad data - set to not touched
-      last_ds4_report.touchpad.p1.unpressed = 1;
-      last_ds4_report.touchpad.p2.unpressed = 1;
+      report.touchpad.p1.unpressed = 1;
+      report.touchpad.p2.unpressed = 1;
 
-      return tud_hid_report(0, &last_ds4_report, sizeof(last_ds4_report));
+      tud_hid_report(0, &report, sizeof(report));
     #else // GENERIC
       hid_gamepad_report_t report = {0};
       report.buttons = gamepad_data.buttons;
@@ -216,32 +233,19 @@ bool hid_task(void) {
       report.ry = gamepad_data.ry;
       report.z = gamepad_data.l2;
       report.rz = gamepad_data.r2;
-      return tud_hid_report(1, &report, sizeof(report));
+      tud_hid_report(1, &report, sizeof(report));
     #endif
   }
-  return false;
 }
 
 int main() {
     board_init();
     setup_uart();
     tusb_init();
-    bool report_sent_status = false;
     while (true) {
         tud_task();
-        report_sent_status = hid_task();
+        hid_task();
         process_uart();
-
-        // Add a small delay to prevent UART spam
-        sleep_ms(10);
-        char buffer[128];
-        sprintf(buffer, "LX:%d LY:%d RX:%d RY:%d BTNS:%04x DPAD:%02x L2:%d R2:%d | Sent:%d\r\n",
-                gamepad_data.lx, gamepad_data.ly,
-                gamepad_data.rx, gamepad_data.ry,
-                gamepad_data.buttons, gamepad_data.dpad,
-                gamepad_data.l2, gamepad_data.r2,
-                report_sent_status);
-        uart_puts(UART_ID, buffer);
     }
     return 0;
 }
