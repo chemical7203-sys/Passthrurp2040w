@@ -52,17 +52,22 @@ class SerialHandler:
         """Continuously reads from the serial port and puts lines in a queue."""
         while self._running and self.ser and self.ser.is_open:
             try:
+                # Low-level debug to see if any bytes are coming in at all
                 if self.ser.in_waiting > 0:
-                    line = self.ser.readline().decode('utf-8').strip()
+                    raw_bytes = self.ser.read(self.ser.in_waiting)
+                    print(f"RAW BYTES RECEIVED: {' '.join(f'{b:02x}' for b in raw_bytes)}")
+                    # The original logic remains, but we now see the raw data first
+                    # It's likely the readline below will not work if no newline is sent
+                    line = raw_bytes.decode('utf-8', errors='ignore').strip()
                     if line:
                         self.rx_queue.append(line)
+
             except serial.SerialException:
                 print("Serial port disconnected during read.")
                 break
             except Exception as e:
-                # This can happen if a non-utf8 character is received
                 print(f"ERROR: Serial read loop exception: {e}")
-            time.sleep(0.001) # Small sleep to yield CPU
+            time.sleep(0.01) # Yield CPU
 
     def get_all_received_lines(self):
         """Pops all current lines from the queue and returns them."""
