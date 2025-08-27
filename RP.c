@@ -112,10 +112,10 @@ uint8_t dpad_to_generic_hat(uint8_t dpad_mask) {
 }
 #endif
 
-void hid_task(void) {
+bool hid_task(void) {
   const uint32_t interval_ms = 5;
   static uint32_t start_ms = 0;
-  if ( board_millis() - start_ms < interval_ms) return;
+  if ( board_millis() - start_ms < interval_ms) return false;
   start_ms += interval_ms;
 
   if ( tud_suspended() ) tud_remote_wakeup();
@@ -131,7 +131,7 @@ void hid_task(void) {
       // TODO: Full button mapping for Switch
       if (gamepad_data.buttons & (1<<0)) report.buttons |= SWITCH_MASK_B;
       if (gamepad_data.buttons & (1<<1)) report.buttons |= SWITCH_MASK_A;
-      tud_hid_report(0, &report, sizeof(report));
+      return tud_hid_report(0, &report, sizeof(report));
     #elif CFG_TUD_HID_SONY
       hid_ds4_report_t report = {0};
       report.report_id = 1;
@@ -172,7 +172,7 @@ void hid_task(void) {
       report.touchpad.p1.unpressed = 1;
       report.touchpad.p2.unpressed = 1;
 
-      tud_hid_report(0, &report, sizeof(report));
+      return tud_hid_report(0, &report, sizeof(report));
     #else // GENERIC
       hid_gamepad_report_t report = {0};
       report.buttons = gamepad_data.buttons;
@@ -183,28 +183,31 @@ void hid_task(void) {
       report.ry = gamepad_data.ry;
       report.z = gamepad_data.l2;
       report.rz = gamepad_data.r2;
-      tud_hid_report(1, &report, sizeof(report));
+      return tud_hid_report(1, &report, sizeof(report));
     #endif
   }
+  return false;
 }
 
 int main() {
     board_init();
     setup_uart();
     tusb_init();
+    bool report_sent_status = false;
     while (true) {
         tud_task();
-        hid_task();
+        report_sent_status = hid_task();
         process_uart();
 
         // Add a small delay to prevent UART spam
         sleep_ms(10);
         char buffer[128];
-        sprintf(buffer, "LX:%d LY:%d RX:%d RY:%d BTNS:%04x DPAD:%02x L2:%d R2:%d\r\n",
+        sprintf(buffer, "LX:%d LY:%d RX:%d RY:%d BTNS:%04x DPAD:%02x L2:%d R2:%d | Sent:%d\r\n",
                 gamepad_data.lx, gamepad_data.ly,
                 gamepad_data.rx, gamepad_data.ry,
                 gamepad_data.buttons, gamepad_data.dpad,
-                gamepad_data.l2, gamepad_data.r2);
+                gamepad_data.l2, gamepad_data.r2,
+                report_sent_status);
         uart_puts(UART_ID, buffer);
     }
     return 0;
