@@ -11,62 +11,89 @@ class DS4Handler(threading.Thread):
         self.signals = signals
         self.command_queue = command_queue
         self.joystick = None
-        self.last_device_change_time = 0
-        self.device_change_cooldown = 0.5  # 500ms cooldown
+        self.joysticks = [] # Store persistent joystick objects
 
     def _initialize_pygame(self):
+        """Initializes Pygame and its subsystems with detailed logging."""
+        print("DEBUG: DS4Handler: Initializing Pygame...")
         try:
             os.environ['SDL_VIDEODRIVER'] = 'dummy'
             pygame.init()
             pygame.joystick.init()
+            print(f"DEBUG: DS4Handler: Pygame initialized successfully.")
             return True
-        except Exception:
+        except Exception as e:
+            print(f"FATAL: DS4Handler: Pygame failed to initialize: {e}")
             return False
 
     def _set_device(self, joystick_index):
+        """Sets or clears the active joystick device using the persistent list."""
+        print(f"DEBUG: DS4Handler: Received SET_DEVICE command for index {joystick_index}")
         if self.joystick:
-            self.joystick.quit()
-            self.joystick = None
+            try:
+                print(f"DEBUG: DS4Handler: Quitting previous joystick instance.")
+                self.joystick.quit()
+            except Exception as e:
+                print(f"ERROR: DS4Handler: Exception while quitting joystick: {e}")
+            finally:
+                self.joystick = None
 
         if joystick_index is not None:
             try:
-                if pygame.joystick.get_count() > joystick_index:
-                    self.joystick = pygame.joystick.Joystick(joystick_index)
+                if len(self.joysticks) > joystick_index:
+                    self.joystick = self.joysticks[joystick_index] # Use the stored object
+                    print(f"DEBUG: DS4Handler: Joystick object retrieved from list for index {joystick_index}. Initializing...")
                     self.joystick.init()
+                    print(f"DEBUG: DS4Handler: Successfully initialized joystick: {self.joystick.get_name()}")
                 else:
+                    print(f"ERROR: DS4Handler: Invalid joystick index {joystick_index}. Stored list length is {len(self.joysticks)}.")
                     self.signals.gamepad_disconnected.emit()
-            except pygame.error:
+            except pygame.error as e:
+                print(f"ERROR: DS4Handler: Pygame error while setting device: {e}")
                 self.joystick = None
                 self.signals.gamepad_disconnected.emit()
+        else:
+            print("DEBUG: DS4Handler: Joystick index is None, device cleared.")
 
     def _refresh_devices(self):
+        """Scans for gamepads, stores them persistently, and emits a signal with their info."""
+        print("DEBUG: DS4Handler: Received REFRESH_DEVICES command.")
+        # Quit all joysticks in the old list before refreshing
+        for joy in self.joysticks:
+            joy.quit()
+        self.joysticks.clear()
+
         pygame.joystick.quit()
         pygame.joystick.init()
 
-        gamepads = []
-        for i in range(pygame.joystick.get_count()):
+        gamepads_info = []
+        count = pygame.joystick.get_count()
+        print(f"DEBUG: DS4Handler: Found {count} joysticks.")
+        for i in range(count):
             try:
                 joystick = pygame.joystick.Joystick(i)
-                gamepads.append({'name': joystick.get_name(), 'index': i})
-            except pygame.error:
+                self.joysticks.append(joystick) # Store the object
+                gamepads_info.append({'name': joystick.get_name(), 'index': i})
+            except pygame.error as e:
+                print(f"DEBUG: DS4Handler: Could not get info for joystick {i}: {e}")
                 continue
 
-        self.signals.gamepad_list_updated.emit(gamepads)
+        print(f"DEBUG: DS4Handler: Emitting gamepad list: {gamepads_info}")
+        self.signals.gamepad_list_updated.emit(gamepads_info)
 
     def _handle_events(self):
         try:
             for event in pygame.event.get():
+                # The refresh logic now handles device changes more gracefully.
+                # A full refresh is triggered by the main UI thread.
                 if event.type == pygame.JOYDEVICEADDED or event.type == pygame.JOYDEVICEREMOVED:
-                    current_time = time.time()
-                    if (current_time - self.last_device_change_time) > self.device_change_cooldown:
-                        self.last_device_change_time = current_time
-                        self.signals.device_changed.emit()
-                    continue
+                    self.signals.device_changed.emit()
 
                 if self.joystick and self.joystick.get_init():
                     if hasattr(event, 'instance_id') and event.instance_id == self.joystick.get_instance_id():
                         self._process_game_event(event)
-        except pygame.error:
+        except pygame.error as e:
+            print(f"ERROR: DS4Handler: Pygame error in event loop: {e}. Disconnecting.")
             self.joystick = None
             self.signals.gamepad_disconnected.emit()
 
@@ -78,6 +105,7 @@ class DS4Handler(threading.Thread):
         while running:
             try:
                 command = self.command_queue.get_nowait()
+                print(f"DEBUG: DS4Handler: Command received from queue: {command}")
                 cmd_type = command.get('type')
 
                 if cmd_type == 'SET_DEVICE':
@@ -95,6 +123,7 @@ class DS4Handler(threading.Thread):
             time.sleep(0.01)
 
         pygame.quit()
+        print("DEBUG: DS4Handler: Thread stopped.")
 
     def _process_game_event(self, event):
         self.signals.raw_event.emit(str(event))
