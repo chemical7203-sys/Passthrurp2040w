@@ -3,7 +3,6 @@
 #include <string.h>
 #include "pico/stdlib.h"
 #include "pico/time.h"
-#include "pico/cyw43_arch.h"
 #include "hardware/uart.h"
 #include "tusb.h"
 #include "bsp/board.h"
@@ -193,21 +192,20 @@ int main() {
     board_init();
     setup_uart();
     tusb_init();
-
-    if (cyw43_arch_init()) {
-        printf("Wi-Fi init failed");
-        return -1;
-    }
-
     while (true) {
-        printf("Hello from RP2040!\n");
-        cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
-        sleep_ms(500);
-        cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
-        sleep_ms(500);
         tud_task();
         hid_task();
         process_uart();
+
+        // Add a small delay to prevent UART spam
+        sleep_ms(10);
+        char buffer[128];
+        sprintf(buffer, "LX:%d LY:%d RX:%d RY:%d BTNS:%04x DPAD:%02x L2:%d R2:%d\r\n",
+                gamepad_data.lx, gamepad_data.ly,
+                gamepad_data.rx, gamepad_data.ry,
+                gamepad_data.buttons, gamepad_data.dpad,
+                gamepad_data.l2, gamepad_data.r2);
+        uart_puts(UART_ID, buffer);
     }
     return 0;
 }
