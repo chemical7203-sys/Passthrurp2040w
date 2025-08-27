@@ -22,6 +22,7 @@ typedef struct __attribute__((packed)) {
 
 static gamepad_data_v2_t gamepad_data;
 static uint8_t report_counter = 0;
+static hid_ds4_report_t last_ds4_report = {0};
 
 #define UART_ID uart1
 #define BAUD_RATE 115200
@@ -65,9 +66,12 @@ void process_uart() {
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen) {
   (void) instance;
   (void) report_id;
-  (void) report_type;
-  (void) buffer;
-  (void) reqlen;
+
+  // For GET_REPORT requests, just return the last sent report
+  if (report_type == HID_REPORT_TYPE_FEATURE) {
+    memcpy(buffer, &last_ds4_report, sizeof(last_ds4_report));
+    return sizeof(last_ds4_report);
+  }
 
   return 0;
 }
@@ -133,46 +137,46 @@ bool hid_task(void) {
       if (gamepad_data.buttons & (1<<1)) report.buttons |= SWITCH_MASK_A;
       return tud_hid_report(0, &report, sizeof(report));
     #elif CFG_TUD_HID_SONY
-      hid_ds4_report_t report = {0};
-      report.report_id = 1;
-      report.left_stick_x = gamepad_data.lx + 128;
-      report.left_stick_y = gamepad_data.ly + 128;
-      report.right_stick_x = gamepad_data.rx + 128;
-      report.right_stick_y = gamepad_data.ry + 128;
-      report.l2_trigger = gamepad_data.l2;
-      report.r2_trigger = gamepad_data.r2;
-      report.dpad = dpad_to_ds4_hat(gamepad_data.dpad);
+      memset(&last_ds4_report, 0, sizeof(last_ds4_report));
+      last_ds4_report.report_id = 1;
+      last_ds4_report.left_stick_x = gamepad_data.lx + 128;
+      last_ds4_report.left_stick_y = gamepad_data.ly + 128;
+      last_ds4_report.right_stick_x = gamepad_data.rx + 128;
+      last_ds4_report.right_stick_y = gamepad_data.ry + 128;
+      last_ds4_report.l2_trigger = gamepad_data.l2;
+      last_ds4_report.r2_trigger = gamepad_data.r2;
+      last_ds4_report.dpad = dpad_to_ds4_hat(gamepad_data.dpad);
 
-      if (gamepad_data.buttons & (1 << 0))  report.square = 1;
-      if (gamepad_data.buttons & (1 << 1))  report.cross = 1;
-      if (gamepad_data.buttons & (1 << 2))  report.circle = 1;
-      if (gamepad_data.buttons & (1 << 3))  report.triangle = 1;
-      if (gamepad_data.buttons & (1 << 4))  report.l1 = 1;
-      if (gamepad_data.buttons & (1 << 5))  report.r1 = 1;
-      if (gamepad_data.buttons & (1 << 6))  report.l2 = 1;
-      if (gamepad_data.buttons & (1 << 7))  report.r2 = 1;
-      if (gamepad_data.buttons & (1 << 8))  report.share = 1;
-      if (gamepad_data.buttons & (1 << 9))  report.options = 1;
-      if (gamepad_data.buttons & (1 << 10)) report.l3 = 1;
-      if (gamepad_data.buttons & (1 << 11)) report.r3 = 1;
-      if (gamepad_data.buttons & (1 << 12)) report.ps = 1;
-      if (gamepad_data.buttons & (1 << 13)) report.tpad = 1;
+      if (gamepad_data.buttons & (1 << 0))  last_ds4_report.square = 1;
+      if (gamepad_data.buttons & (1 << 1))  last_ds4_report.cross = 1;
+      if (gamepad_data.buttons & (1 << 2))  last_ds4_report.circle = 1;
+      if (gamepad_data.buttons & (1 << 3))  last_ds4_report.triangle = 1;
+      if (gamepad_data.buttons & (1 << 4))  last_ds4_report.l1 = 1;
+      if (gamepad_data.buttons & (1 << 5))  last_ds4_report.r1 = 1;
+      if (gamepad_data.buttons & (1 << 6))  last_ds4_report.l2 = 1;
+      if (gamepad_data.buttons & (1 << 7))  last_ds4_report.r2 = 1;
+      if (gamepad_data.buttons & (1 << 8))  last_ds4_report.share = 1;
+      if (gamepad_data.buttons & (1 << 9))  last_ds4_report.options = 1;
+      if (gamepad_data.buttons & (1 << 10)) last_ds4_report.l3 = 1;
+      if (gamepad_data.buttons & (1 << 11)) last_ds4_report.r3 = 1;
+      if (gamepad_data.buttons & (1 << 12)) last_ds4_report.ps = 1;
+      if (gamepad_data.buttons & (1 << 13)) last_ds4_report.tpad = 1;
 
-      report.report_counter = report_counter++;
+      last_ds4_report.report_counter = report_counter++;
 
       // Gyro and accelerometer data - set to zero as not provided by UART
-      report.accel_x = 0;
-      report.accel_y = 0;
-      report.accel_z = 0;
-      report.gyro_x = 0;
-      report.gyro_y = 0;
-      report.gyro_z = 0;
+      last_ds4_report.accel_x = 0;
+      last_ds4_report.accel_y = 0;
+      last_ds4_report.accel_z = 0;
+      last_ds4_report.gyro_x = 0;
+      last_ds4_report.gyro_y = 0;
+      last_ds4_report.gyro_z = 0;
 
       // Touchpad data - set to not touched
-      report.touchpad.p1.unpressed = 1;
-      report.touchpad.p2.unpressed = 1;
+      last_ds4_report.touchpad.p1.unpressed = 1;
+      last_ds4_report.touchpad.p2.unpressed = 1;
 
-      return tud_hid_report(0, &report, sizeof(report));
+      return tud_hid_report(0, &last_ds4_report, sizeof(last_ds4_report));
     #else // GENERIC
       hid_gamepad_report_t report = {0};
       report.buttons = gamepad_data.buttons;
