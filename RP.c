@@ -193,6 +193,8 @@ int main() {
     setup_uart();
     tusb_init();
     while (true) {
+        printf("Hello from RP2040!\n");
+        sleep_ms(1000);
         tud_task();
         hid_task();
         process_uart();
