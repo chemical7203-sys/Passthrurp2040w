@@ -10,6 +10,8 @@
 
 #if CFG_TUD_HID_SONY
 #include "ds4_report.h"
+#elif CFG_TUD_HID_NINTENDO
+#include "switch_report.h"
 #endif
 
 // Struct to hold the received v2 controller data from UART
@@ -139,8 +141,8 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
 uint8_t dpad_to_switch_hat(uint8_t dpad_mask) {
     static const uint8_t hat_map[16] = {
         SWITCH_HAT_NOTHING, SWITCH_HAT_UP, SWITCH_HAT_DOWN, SWITCH_HAT_NOTHING,
-        SWITCH_HAT_LEFT, SWITCH_HAT_UP_LEFT, SWITCH_HAT_DOWN_LEFT, SWITCH_HAT_NOTHING,
-        SWITCH_HAT_RIGHT, SWITCH_HAT_UP_RIGHT, SWITCH_HAT_DOWN_RIGHT, SWITCH_HAT_NOTHING,
+        SWITCH_HAT_LEFT, SWITCH_HAT_UPLEFT, SWITCH_HAT_DOWNLEFT, SWITCH_HAT_NOTHING,
+        SWITCH_HAT_RIGHT, SWITCH_HAT_UPRIGHT, SWITCH_HAT_DOWNRIGHT, SWITCH_HAT_NOTHING,
         SWITCH_HAT_NOTHING, SWITCH_HAT_NOTHING, SWITCH_HAT_NOTHING, SWITCH_HAT_NOTHING
     };
     return hat_map[dpad_mask & 0x0F];
@@ -173,14 +175,32 @@ void hid_task(void) {
   if ( tud_hid_ready() ) {
     #if CFG_TUD_HID_NINTENDO
       hid_nintendo_report_t report = {0};
+
+      // Button mapping
+      if (gamepad_data.buttons & (1 << 1)) report.buttons |= SWITCH_MASK_A;
+      if (gamepad_data.buttons & (1 << 0)) report.buttons |= SWITCH_MASK_B;
+      if (gamepad_data.buttons & (1 << 3)) report.buttons |= SWITCH_MASK_X;
+      if (gamepad_data.buttons & (1 << 2)) report.buttons |= SWITCH_MASK_Y;
+      if (gamepad_data.buttons & (1 << 4)) report.buttons |= SWITCH_MASK_L;
+      if (gamepad_data.buttons & (1 << 5)) report.buttons |= SWITCH_MASK_R;
+      if (gamepad_data.buttons & (1 << 6)) report.buttons |= SWITCH_MASK_ZL;
+      if (gamepad_data.buttons & (1 << 7)) report.buttons |= SWITCH_MASK_ZR;
+      if (gamepad_data.buttons & (1 << 8)) report.buttons |= SWITCH_MASK_MINUS;
+      if (gamepad_data.buttons & (1 << 9)) report.buttons |= SWITCH_MASK_PLUS;
+      if (gamepad_data.buttons & (1 << 10)) report.buttons |= SWITCH_MASK_L3;
+      if (gamepad_data.buttons & (1 << 11)) report.buttons |= SWITCH_MASK_R3;
+      if (gamepad_data.buttons & (1 << 12)) report.buttons |= SWITCH_MASK_HOME;
+      if (gamepad_data.buttons & (1 << 13)) report.buttons |= SWITCH_MASK_CAPTURE;
+
+      // D-pad
       report.hat = dpad_to_switch_hat(gamepad_data.dpad);
+
+      // Analog sticks
       report.lx = gamepad_data.lx + 128;
       report.ly = gamepad_data.ly + 128;
       report.rx = gamepad_data.rx + 128;
       report.ry = gamepad_data.ry + 128;
-      // TODO: Full button mapping for Switch
-      if (gamepad_data.buttons & (1<<0)) report.buttons |= SWITCH_MASK_B;
-      if (gamepad_data.buttons & (1<<1)) report.buttons |= SWITCH_MASK_A;
+
       tud_hid_report(0, &report, sizeof(report));
     #elif CFG_TUD_HID_SONY
       hid_ds4_report_t report = {0};
