@@ -216,17 +216,6 @@ int main() {
         tud_task();
         hid_task();
         process_uart();
-
-        // Add a small delay to prevent UART spam and provide comprehensive debug output
-        sleep_ms(50);
-        char buffer[256];
-        sprintf(buffer, "Raw: LX:%d LY:%d RX:%d RY:%d DPAD:%02x BTNS:%04x L2:%d R2:%d\r\n",
-                gamepad_data.lx, gamepad_data.ly,
-                gamepad_data.rx, gamepad_data.ry,
-                gamepad_data.dpad,
-                gamepad_data.buttons,
-                gamepad_data.l2, gamepad_data.r2);
-        uart_puts(UART_ID, buffer);
     }
     return 0;
 }
