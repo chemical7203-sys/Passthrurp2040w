@@ -2,10 +2,9 @@ import sys
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import QTimer
 from gamepad_ui import GamepadUI, GamepadSignals
-from ds4_handler import DS4Handler
-from serial_handler import SerialHandler
-# device_manager is no longer needed
 from gamepad_handler import GamepadHandler
+from serial_handler import SerialHandler
+from queue import Queue
 
 class MainApplication:
     def __init__(self):
