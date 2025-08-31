@@ -63,10 +63,7 @@ typedef struct __attribute__((packed)) {
     uint8_t left_stick_y;
     uint8_t right_stick_x;
     uint8_t right_stick_y;
-    // 4 bits for the d-pad.
     uint8_t dpad : 4;
-
-    // 14 bits for buttons.
     uint16_t square : 1;
     uint16_t cross : 1;
     uint16_t circle : 1;
@@ -81,8 +78,6 @@ typedef struct __attribute__((packed)) {
     uint16_t r3 : 1;
     uint16_t ps : 1;
     uint16_t tpad : 1;
-
-    // 6 bit report counter.
     uint8_t report_counter : 6;
     uint8_t l2_trigger;
     uint8_t r2_trigger;

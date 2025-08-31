@@ -2,8 +2,9 @@ import sys
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import QTimer
 from gamepad_ui import GamepadUI, GamepadSignals
-from gamepad_handler import GamepadHandler
+from ds4_handler import DS4Handler
 from serial_handler import SerialHandler
+# device_manager is no longer needed
 from queue import Queue
 
 class MainApplication:
@@ -13,7 +14,7 @@ class MainApplication:
         self.gamepad_signals = GamepadSignals()
 
         self.command_queue = Queue()
-        self.gamepad_handler = GamepadHandler(self.gamepad_signals, self.command_queue)
+        self.ds4_handler = DS4Handler(self.gamepad_signals, self.command_queue)
         self.serial_handler = SerialHandler()
 
         self.serial_state = {
@@ -32,7 +33,7 @@ class MainApplication:
         }
 
         self.connect_signals()
-        self.gamepad_handler.start()
+        self.ds4_handler.start()
         self.refresh_all_devices()
 
         self.tx_timer = QTimer()
@@ -144,7 +145,7 @@ class MainApplication:
         self.tx_timer.stop()
         self.rx_monitor_timer.stop()
         self.command_queue.put({'type': 'STOP'})
-        self.gamepad_handler.join()
+        self.ds4_handler.join()
         self.serial_handler.disconnect()
 
 if __name__ == '__main__':
