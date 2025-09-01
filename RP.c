@@ -138,30 +138,11 @@ void hid_task(void) {
       if (gamepad_data.buttons & (1 << 9)) report.buttons |= SWITCH_MASK_PLUS;
       if (gamepad_data.buttons & (1 << 10)) report.buttons |= SWITCH_MASK_L3;
       if (gamepad_data.buttons & (1 << 11)) report.buttons |= SWITCH_MASK_R3;
+      if (gamepad_data.buttons & (1 << 12)) report.buttons |= SWITCH_MASK_HOME;
       if (gamepad_data.buttons & (1 << 13)) report.buttons |= SWITCH_MASK_CAPTURE;
 
-      // --- DPAD/Home Button Swap Logic ---
-      // To perform a clean swap, we create remapped variables.
-      uint16_t remapped_buttons = gamepad_data.buttons;
-      uint8_t  remapped_dpad = gamepad_data.dpad;
-
-      bool physical_home_pressed = (gamepad_data.buttons & (1 << 12));
-      bool physical_dpad_up_pressed = (gamepad_data.dpad & 0x01);
-
-      if (physical_home_pressed) {
-        remapped_buttons &= ~(1 << 12); // Turn off the home bit in the remapped data
-        remapped_dpad |= 0x01;         // Turn on the UP bit in the remapped data
-      }
-
-      if (physical_dpad_up_pressed) {
-        remapped_dpad &= ~0x01;        // Turn off the UP bit in the remapped data
-        remapped_buttons |= (1 << 12); // Turn on the home bit in the remapped data
-      }
-
-      // Now, use the remapped data to generate the final report
-      if (remapped_buttons & (1 << 12)) report.buttons |= SWITCH_MASK_HOME;
-      report.hat = dpad_to_switch_hat(remapped_dpad);
-      // --- End Swap Logic ---
+      // D-pad
+      report.hat = dpad_to_switch_hat(gamepad_data.dpad);
 
       // Analog sticks
       report.lx = gamepad_data.lx + 128;
