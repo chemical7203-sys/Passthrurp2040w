@@ -138,11 +138,25 @@ void hid_task(void) {
       if (gamepad_data.buttons & (1 << 9)) report.buttons |= SWITCH_MASK_PLUS;
       if (gamepad_data.buttons & (1 << 10)) report.buttons |= SWITCH_MASK_L3;
       if (gamepad_data.buttons & (1 << 11)) report.buttons |= SWITCH_MASK_R3;
-      if (gamepad_data.buttons & (1 << 12)) report.buttons |= SWITCH_MASK_HOME;
       if (gamepad_data.buttons & (1 << 13)) report.buttons |= SWITCH_MASK_CAPTURE;
 
-      // D-pad
-      report.hat = dpad_to_switch_hat(gamepad_data.dpad);
+      // --- DPAD/Home Button Swap Logic ---
+      bool physical_home_pressed = (gamepad_data.buttons & (1 << 12));
+      uint8_t dpad_input = gamepad_data.dpad;
+
+      // 1. Handle DPAD directions first, excluding UP since it's special.
+      report.hat = dpad_to_switch_hat(dpad_input & 0xFE); // 0xFE = 11111110, masks out the UP bit
+
+      // 2. If the physical Home button is pressed, override the hat to be UP.
+      if (physical_home_pressed) {
+        report.hat = SWITCH_HAT_UP;
+      }
+
+      // 3. If the physical DPAD UP is being pressed, set the Home button output.
+      if (dpad_input & 0x01) {
+        report.buttons |= SWITCH_MASK_HOME;
+      }
+      // --- End Swap Logic ---
 
       // Analog sticks
       report.lx = gamepad_data.lx + 128;
