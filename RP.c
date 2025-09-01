@@ -138,11 +138,12 @@ void hid_task(void) {
       if (gamepad_data.buttons & (1 << 9)) report.buttons |= SWITCH_MASK_PLUS;
       if (gamepad_data.buttons & (1 << 10)) report.buttons |= SWITCH_MASK_L3;
       if (gamepad_data.buttons & (1 << 11)) report.buttons |= SWITCH_MASK_R3;
-      if (gamepad_data.buttons & (1 << 12)) report.buttons |= SWITCH_MASK_HOME;
+      // if (gamepad_data.buttons & (1 << 12)) report.buttons |= SWITCH_MASK_HOME; // Old mapping
       if (gamepad_data.buttons & (1 << 13)) report.buttons |= SWITCH_MASK_CAPTURE;
 
-      // D-pad
-      report.hat = dpad_to_switch_hat(gamepad_data.dpad);
+      // D-pad (disabled for diagnostics) and Home Button
+      // report.hat = dpad_to_switch_hat(gamepad_data.dpad); // Old mapping
+      if (gamepad_data.dpad & 0x01) report.buttons |= SWITCH_MASK_HOME; // New mapping based on user feedback
 
       // Analog sticks
       report.lx = gamepad_data.lx + 128;
