@@ -30,21 +30,10 @@ static uint8_t report_counter = 0;
 #define UART_TX_PIN 4
 #define UART_RX_PIN 5
 
-// For debug output
-#define DEBUG_UART_ID uart0
-#define DEBUG_UART_TX_PIN 0
-#define DEBUG_UART_RX_PIN 1
-
 void setup_uart() {
     uart_init(UART_ID, BAUD_RATE);
     gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
-
-    // For debugging
-    uart_init(DEBUG_UART_ID, BAUD_RATE);
-    gpio_set_function(DEBUG_UART_TX_PIN, GPIO_FUNC_UART);
-    gpio_set_function(DEBUG_UART_RX_PIN, GPIO_FUNC_UART);
-
 }
 void process_uart() {
     static uint8_t pb[11];
@@ -231,7 +220,7 @@ void debug_task() {
             gamepad_data.buttons, gamepad_data.lx, gamepad_data.ly,
             gamepad_data.rx, gamepad_data.ry, gamepad_data.l2,
             gamepad_data.r2, gamepad_data.dpad);
-    uart_puts(DEBUG_UART_ID, buf);
+    uart_puts(UART_ID, buf);
 }
 
 int main() {
