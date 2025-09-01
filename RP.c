@@ -132,8 +132,8 @@ void hid_task(void) {
       if (gamepad_data.buttons & (1 << 2)) report.buttons |= SWITCH_MASK_Y;
       if (gamepad_data.buttons & (1 << 4)) report.buttons |= SWITCH_MASK_L;
       if (gamepad_data.buttons & (1 << 5)) report.buttons |= SWITCH_MASK_R;
-      if (gamepad_data.buttons & (1 << 6)) report.buttons |= SWITCH_MASK_ZL;
-      if (gamepad_data.buttons & (1 << 7)) report.buttons |= SWITCH_MASK_ZR;
+      if (gamepad_data.l2 > 30) report.buttons |= SWITCH_MASK_ZL;
+      if (gamepad_data.r2 > 30) report.buttons |= SWITCH_MASK_ZR;
       if (gamepad_data.buttons & (1 << 8)) report.buttons |= SWITCH_MASK_MINUS;
       if (gamepad_data.buttons & (1 << 9)) report.buttons |= SWITCH_MASK_PLUS;
       if (gamepad_data.buttons & (1 << 10)) report.buttons |= SWITCH_MASK_L3;
