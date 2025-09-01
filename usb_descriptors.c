@@ -76,7 +76,7 @@ uint8_t const desc_hid_report[] =
         0x46, 0xFF, 0x00,  //   Physical Maximum (255)
         0x09, 0x30,        //   Usage (X)
         0x09, 0x31,        //   Usage (Y)
-        0x09, 0x34,        //   Usage (Ry)
+        0x09, 0x32,        //   Usage (Z)
         0x09, 0x33,        //   Usage (Rx)
         0x75, 0x08,        //   Report Size (8)
         0x95, 0x04,        //   Report Count (4)
