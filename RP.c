@@ -30,7 +30,22 @@ static uint8_t report_counter = 0;
 #define UART_TX_PIN 4
 #define UART_RX_PIN 5
 
-void setup_uart() { uart_init(UART_ID, BAUD_RATE); gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART); gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART); }
+// For debug output
+#define DEBUG_UART_ID uart0
+#define DEBUG_UART_TX_PIN 0
+#define DEBUG_UART_RX_PIN 1
+
+void setup_uart() {
+    uart_init(UART_ID, BAUD_RATE);
+    gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
+    gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
+
+    // For debugging
+    uart_init(DEBUG_UART_ID, BAUD_RATE);
+    gpio_set_function(DEBUG_UART_TX_PIN, GPIO_FUNC_UART);
+    gpio_set_function(DEBUG_UART_RX_PIN, GPIO_FUNC_UART);
+
+}
 void process_uart() {
     static uint8_t pb[11];
     static uint8_t idx = 0;
@@ -49,11 +64,6 @@ void process_uart() {
                 }
                 if (cs == pb[10]) {
                     memcpy(&gamepad_data, &pb[1], sizeof(gamepad_data));
-                    // Add a debug print to send data back to the host
-                    printf("RX: btns=%04x, lx=%d, ly=%d, rx=%d, ry=%d, l2=%d, r2=%d, dpad=%02x\n",
-                           gamepad_data.buttons, gamepad_data.lx, gamepad_data.ly,
-                           gamepad_data.rx, gamepad_data.ry, gamepad_data.l2,
-                           gamepad_data.r2, gamepad_data.dpad);
                 }
                 idx = 0;
             }
@@ -208,6 +218,22 @@ void hid_task(void) {
   }
 }
 
+void debug_task() {
+    static uint32_t start_ms = 0;
+    const uint32_t interval_ms = 100;
+    if (board_millis() - start_ms < interval_ms) {
+        return;
+    }
+    start_ms += interval_ms;
+
+    char buf[128];
+    sprintf(buf, "RX: btns=%04x, lx=%d, ly=%d, rx=%d, ry=%d, l2=%d, r2=%d, dpad=%02x\r\n",
+            gamepad_data.buttons, gamepad_data.lx, gamepad_data.ly,
+            gamepad_data.rx, gamepad_data.ry, gamepad_data.l2,
+            gamepad_data.r2, gamepad_data.dpad);
+    uart_puts(DEBUG_UART_ID, buf);
+}
+
 int main() {
     board_init();
     setup_uart();
@@ -216,6 +242,7 @@ int main() {
         tud_task();
         hid_task();
         process_uart();
+        debug_task();
     }
     return 0;
 }
