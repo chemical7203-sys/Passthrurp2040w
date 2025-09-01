@@ -141,21 +141,26 @@ void hid_task(void) {
       if (gamepad_data.buttons & (1 << 13)) report.buttons |= SWITCH_MASK_CAPTURE;
 
       // --- DPAD/Home Button Swap Logic ---
+      // To perform a clean swap, we create remapped variables.
+      uint16_t remapped_buttons = gamepad_data.buttons;
+      uint8_t  remapped_dpad = gamepad_data.dpad;
+
       bool physical_home_pressed = (gamepad_data.buttons & (1 << 12));
-      uint8_t dpad_input = gamepad_data.dpad;
+      bool physical_dpad_up_pressed = (gamepad_data.dpad & 0x01);
 
-      // 1. Handle DPAD directions first, excluding UP since it's special.
-      report.hat = dpad_to_switch_hat(dpad_input & 0xFE); // 0xFE = 11111110, masks out the UP bit
-
-      // 2. If the physical Home button is pressed, override the hat to be UP.
       if (physical_home_pressed) {
-        report.hat = SWITCH_HAT_UP;
+        remapped_buttons &= ~(1 << 12); // Turn off the home bit in the remapped data
+        remapped_dpad |= 0x01;         // Turn on the UP bit in the remapped data
       }
 
-      // 3. If the physical DPAD UP is being pressed, set the Home button output.
-      if (dpad_input & 0x01) {
-        report.buttons |= SWITCH_MASK_HOME;
+      if (physical_dpad_up_pressed) {
+        remapped_dpad &= ~0x01;        // Turn off the UP bit in the remapped data
+        remapped_buttons |= (1 << 12); // Turn on the home bit in the remapped data
       }
+
+      // Now, use the remapped data to generate the final report
+      if (remapped_buttons & (1 << 12)) report.buttons |= SWITCH_MASK_HOME;
+      report.hat = dpad_to_switch_hat(remapped_dpad);
       // --- End Swap Logic ---
 
       // Analog sticks
@@ -221,22 +226,6 @@ void hid_task(void) {
   }
 }
 
-void debug_task() {
-    static uint32_t start_ms = 0;
-    const uint32_t interval_ms = 100;
-    if (board_millis() - start_ms < interval_ms) {
-        return;
-    }
-    start_ms += interval_ms;
-
-    char buf[128];
-    sprintf(buf, "RX: btns=%04x, lx=%d, ly=%d, rx=%d, ry=%d, l2=%d, r2=%d, dpad=%02x\r\n",
-            gamepad_data.buttons, gamepad_data.lx, gamepad_data.ly,
-            gamepad_data.rx, gamepad_data.ry, gamepad_data.l2,
-            gamepad_data.r2, gamepad_data.dpad);
-    uart_puts(UART_ID, buf);
-}
-
 int main() {
     board_init();
     setup_uart();
@@ -245,7 +234,6 @@ int main() {
         tud_task();
         hid_task();
         process_uart();
-        debug_task();
     }
     return 0;
 }
