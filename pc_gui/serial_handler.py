@@ -85,21 +85,19 @@ class SerialHandler:
         rx = max(-127, min(127, state.get('rx', 0))); ry = max(-127, min(127, state.get('ry', 0)))
         l2 = max(0, min(255, state.get('l2', 0))); r2 = max(0, min(255, state.get('r2', 0)))
 
-        # Add padding as per user suggestion for UART stability
         dummy_start = 0x00
         dummy_end = 0x00
-
         header = 0xA6
 
-        # Pack the payload including the dummy bytes
-        # B H 4b 2B B = 1 + 2 + 4 + 2 + 1 = 10 bytes? No, 11 bytes.
-        # B (dummy) + H (buttons) + 4b (sticks) + 2B (triggers) + B (dpad) + B (dummy)
-        payload = struct.pack('<BH4b2BB', dummy_start, buttons, lx, ly, rx, ry, l2, r2, dpad, dummy_end)
+        # 1. Construct the 11-byte padded payload
+        payload = struct.pack('<BH4b2BBB', dummy_start, buttons, lx, ly, rx, ry, l2, r2, dpad, dummy_end)
 
+        # 2. Calculate checksum over the header and the 11-byte padded payload
         checksum = header
         for byte in payload:
             checksum ^= byte
 
+        # 3. Return the final 13-byte packet
         return bytearray([header]) + payload + bytearray([checksum])
 
     def send_gamepad_state_v2(self, state):

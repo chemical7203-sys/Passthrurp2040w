@@ -52,7 +52,7 @@ void process_uart() {
             pb[idx++] = ch;
             if (idx >= 13) {
                 uint8_t cs = 0;
-                // Checksum is now over the 11-byte payload
+                // Checksum is now over the header and the 11-byte payload
                 for (int i = 0; i < 12; i++) {
                     cs ^= pb[i];
                 }
