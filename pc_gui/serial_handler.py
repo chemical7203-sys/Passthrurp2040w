@@ -84,12 +84,23 @@ class SerialHandler:
         lx = max(-127, min(127, state.get('lx', 0))); ly = max(-127, min(127, state.get('ly', 0)))
         rx = max(-127, min(127, state.get('rx', 0))); ry = max(-127, min(127, state.get('ry', 0)))
         l2 = max(0, min(255, state.get('l2', 0))); r2 = max(0, min(255, state.get('r2', 0)))
+
+        # Add padding as per user suggestion for UART stability
+        dummy_start = 0x00
+        dummy_end = 0x00
+
         header = 0xA6
-        packet_data = struct.pack('<H4b2B', buttons, lx, ly, rx, ry, l2, r2)
+
+        # Pack the payload including the dummy bytes
+        # B H 4b 2B B = 1 + 2 + 4 + 2 + 1 = 10 bytes? No, 11 bytes.
+        # B (dummy) + H (buttons) + 4b (sticks) + 2B (triggers) + B (dpad) + B (dummy)
+        payload = struct.pack('<BH4b2BB', dummy_start, buttons, lx, ly, rx, ry, l2, r2, dpad, dummy_end)
+
         checksum = header
-        for byte in packet_data: checksum ^= byte
-        checksum ^= dpad
-        return bytearray([header]) + packet_data + bytearray([dpad, checksum])
+        for byte in payload:
+            checksum ^= byte
+
+        return bytearray([header]) + payload + bytearray([checksum])
 
     def send_gamepad_state_v2(self, state):
         if not self.ser or not self.ser.is_open: return

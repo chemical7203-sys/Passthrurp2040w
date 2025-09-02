@@ -15,11 +15,14 @@
 #endif
 
 // Struct to hold the received v2 controller data from UART
+// Includes padding bytes to solve potential UART timing/framing issues
 typedef struct __attribute__((packed)) {
+    uint8_t  dummy_start;
     uint16_t buttons;
     int8_t   lx, ly, rx, ry;
     uint8_t  l2, r2;
     uint8_t  dpad;
+    uint8_t  dummy_end;
 } gamepad_data_v2_t;
 
 static gamepad_data_v2_t gamepad_data;
@@ -36,7 +39,8 @@ void setup_uart() {
     gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
 }
 void process_uart() {
-    static uint8_t pb[11];
+    // Expecting a 13-byte packet: 1 header + 11 payload + 1 checksum
+    static uint8_t pb[13];
     static uint8_t idx = 0;
     while (uart_is_readable(UART_ID)) {
         uint8_t ch = uart_getc(UART_ID);
@@ -46,12 +50,14 @@ void process_uart() {
             }
         } else {
             pb[idx++] = ch;
-            if (idx >= 11) {
+            if (idx >= 13) {
                 uint8_t cs = 0;
-                for (int i = 0; i < 10; i++) {
+                // Checksum is now over the 11-byte payload
+                for (int i = 0; i < 12; i++) {
                     cs ^= pb[i];
                 }
-                if (cs == pb[10]) {
+                if (cs == pb[12]) {
+                    // Copy the 11-byte payload into the padded struct
                     memcpy(&gamepad_data, &pb[1], sizeof(gamepad_data));
                 }
                 idx = 0;
@@ -125,19 +131,8 @@ void hid_task(void) {
     #if CFG_TUD_HID_NINTENDO
       hid_nintendo_report_t report = {0};
 
-      // --- Pre-processing: Swap scrambled input bits ---
-      // As per user direction, swap the top 4 bits of `buttons` with the bottom 4 bits of `dpad`.
-      uint16_t btns_top_nibble = (gamepad_data.buttons >> 12) & 0x000F;
-      uint8_t dpad_bottom_nibble = gamepad_data.dpad & 0x0F;
-
-      gamepad_data.buttons &= 0x0FFF; // Clear top 4 bits
-      gamepad_data.dpad &= 0xF0;     // Clear bottom 4 bits
-
-      gamepad_data.buttons |= (dpad_bottom_nibble << 12);
-      gamepad_data.dpad |= btns_top_nibble;
-      // --- End of bit-swap ---
-
-      // Button mapping
+      // Button mapping uses direct 1-to-1 logic.
+      // The padding fix should resolve any data corruption issues.
       if (gamepad_data.buttons & (1 << 1)) report.buttons |= SWITCH_MASK_A;
       if (gamepad_data.buttons & (1 << 0)) report.buttons |= SWITCH_MASK_B;
       if (gamepad_data.buttons & (1 << 3)) report.buttons |= SWITCH_MASK_X;
