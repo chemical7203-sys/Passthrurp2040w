@@ -125,6 +125,18 @@ void hid_task(void) {
     #if CFG_TUD_HID_NINTENDO
       hid_nintendo_report_t report = {0};
 
+      // --- Pre-processing: Swap scrambled input bits ---
+      // As per user direction, swap the top 4 bits of `buttons` with the bottom 4 bits of `dpad`.
+      uint16_t btns_top_nibble = (gamepad_data.buttons >> 12) & 0x000F;
+      uint8_t dpad_bottom_nibble = gamepad_data.dpad & 0x0F;
+
+      gamepad_data.buttons &= 0x0FFF; // Clear top 4 bits
+      gamepad_data.dpad &= 0xF0;     // Clear bottom 4 bits
+
+      gamepad_data.buttons |= (dpad_bottom_nibble << 12);
+      gamepad_data.dpad |= btns_top_nibble;
+      // --- End of bit-swap ---
+
       // Button mapping
       if (gamepad_data.buttons & (1 << 1)) report.buttons |= SWITCH_MASK_A;
       if (gamepad_data.buttons & (1 << 0)) report.buttons |= SWITCH_MASK_B;
