@@ -112,7 +112,8 @@ void cc1101_configure() {
     cc1101_write_reg(CC1101_FREQ0, 0x71);
 
     // Modem configuration for OOK/ASK
-    cc1101_write_reg(CC1101_MDMCFG4, 0x88); // RX filter BW = 101.56 kHz
+    // Set widest possible RX filter bandwidth to catch signals that might be off-frequency
+    cc1101_write_reg(CC1101_MDMCFG4, 0x08); // RX filter BW = 812 KHz (widest setting)
     cc1101_write_reg(CC1101_MDMCFG3, 0x21); // Data rate = 2.4 kBaud
     cc1101_write_reg(CC1101_MDMCFG2, 0x30); // ASK modulation, no sync/preamble
     cc1101_write_reg(CC1101_MDMCFG1, 0x22); // No FEC
