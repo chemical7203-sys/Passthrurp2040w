@@ -35,14 +35,20 @@ class App(tk.Tk):
         self.disconnect_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         # Frame for controls
-        control_frame = ttk.LabelFrame(self, text="Controls")
+        control_frame = ttk.LabelFrame(self, text="Controls & Debug")
         control_frame.pack(padx=10, pady=5, fill="x")
 
         self.start_capture_button = ttk.Button(control_frame, text="Start Capture", command=lambda: self.send_command("C"), state=tk.DISABLED)
         self.start_capture_button.pack(side=tk.LEFT, padx=5, pady=5)
 
-        self.stop_capture_button = ttk.Button(control_frame, text="Stop Capture", command=lambda: self.send_command("E"), state=tk.DISABLED)
-        self.stop_capture_button.pack(side=tk.LEFT, padx=5, pady=5)
+        self.start_rssi_button = ttk.Button(control_frame, text="Start RSSI Scan", command=lambda: self.send_command("S"), state=tk.DISABLED)
+        self.start_rssi_button.pack(side=tk.LEFT, padx=5, pady=5)
+
+        self.stop_button = ttk.Button(control_frame, text="Stop", command=lambda: self.send_command("E"), state=tk.DISABLED)
+        self.stop_button.pack(side=tk.LEFT, padx=5, pady=5)
+
+        self.dump_regs_button = ttk.Button(control_frame, text="Dump Registers", command=lambda: self.send_command("D"), state=tk.DISABLED)
+        self.dump_regs_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         # Frame for transmission
         tx_frame = ttk.LabelFrame(self, text="Transmit")
@@ -83,7 +89,9 @@ class App(tk.Tk):
             self.connect_button.config(state=tk.DISABLED)
             self.disconnect_button.config(state=tk.NORMAL)
             self.start_capture_button.config(state=tk.NORMAL)
-            self.stop_capture_button.config(state=tk.NORMAL)
+            self.start_rssi_button.config(state=tk.NORMAL)
+            self.stop_button.config(state=tk.NORMAL)
+            self.dump_regs_button.config(state=tk.NORMAL)
             self.transmit_button.config(state=tk.NORMAL)
 
             self.running = True
@@ -104,7 +112,9 @@ class App(tk.Tk):
         self.connect_button.config(state=tk.NORMAL)
         self.disconnect_button.config(state=tk.DISABLED)
         self.start_capture_button.config(state=tk.DISABLED)
-        self.stop_capture_button.config(state=tk.DISABLED)
+        self.start_rssi_button.config(state=tk.DISABLED)
+        self.stop_button.config(state=tk.DISABLED)
+        self.dump_regs_button.config(state=tk.DISABLED)
         self.transmit_button.config(state=tk.DISABLED)
 
 
@@ -120,7 +130,6 @@ class App(tk.Tk):
                 self.disconnect_serial()
                 break
             except Exception as e:
-                # Catch other potential errors, like utf-8 decoding
                 self.log(f"An error occurred: {e}")
             time.sleep(0.1)
 
@@ -138,7 +147,6 @@ class App(tk.Tk):
             self.log("Error: Transmit data is empty.")
             return
 
-        # Basic validation for hex string
         if not all(c in '0123456789abcdefABCDEF' for c in data):
             self.log("Error: Invalid characters in hex data.")
             return

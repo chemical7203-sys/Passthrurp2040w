@@ -118,7 +118,8 @@ void cc1101_configure() {
     cc1101_write_reg(CC1101_MDMCFG1, 0x22); // No FEC
     cc1101_write_reg(CC1101_MDMCFG0, 0xF8); // Channel spacing = 200 kHz
 
-    cc1101_write_reg(CC1101_PKTCTRL0, 0x45); // Asynchronous serial mode, variable packet length
+    // Asynchronous serial mode, variable packet length, CRC disabled
+    cc1101_write_reg(CC1101_PKTCTRL0, 0x44);
     cc1101_write_reg(CC1101_IOCFG0, 0x06);   // GDO0 asserts when sync word sent/received, de-asserts at end of packet
 
     // Other settings
