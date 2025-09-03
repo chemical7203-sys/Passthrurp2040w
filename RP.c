@@ -214,6 +214,22 @@ void hid_task(void) {
   }
 }
 
+void debug_task() {
+    static uint32_t start_ms = 0;
+    const uint32_t interval_ms = 100;
+    if (board_millis() - start_ms < interval_ms) {
+        return;
+    }
+    start_ms += interval_ms;
+
+    char buf[128];
+    sprintf(buf, "RX: btns=%04x, lx=%d, ly=%d, rx=%d, ry=%d, l2=%d, r2=%d, dpad=%02x\r\n",
+            gamepad_data.buttons, gamepad_data.lx, gamepad_data.ly,
+            gamepad_data.rx, gamepad_data.ry, gamepad_data.l2,
+            gamepad_data.r2, gamepad_data.dpad);
+    uart_puts(UART_ID, buf);
+}
+
 int main() {
     board_init();
     setup_uart();
@@ -222,6 +238,7 @@ int main() {
         tud_task();
         hid_task();
         process_uart();
+        debug_task();
     }
     return 0;
 }
