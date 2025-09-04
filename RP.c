@@ -78,12 +78,18 @@ int main()
                 cc1101_strobe(CC1101_SRX);
             }
         } else if (rssi_mode) {
+            // Force re-calibration of the receiver by cycling between IDLE and RX
+            cc1101_strobe(CC1101_SIDLE);
+            sleep_us(500);
+            cc1101_strobe(CC1101_SRX);
+            sleep_us(500);
+
             uint8_t rssi_raw = cc1101_read_status_reg(CC1101_RSSI);
             int16_t rssi_dbm = convert_rssi(rssi_raw);
             char rssi_msg[32];
             sprintf(rssi_msg, "RSSI_DBM:%d\n", rssi_dbm);
             uart_puts(UART_ID, rssi_msg);
-            sleep_ms(100); // Update 10 times per second
+            sleep_ms(100); // Control overall loop speed
         } else {
             sleep_ms(10); // Not in a continuous mode, sleep briefly
         }
@@ -106,7 +112,7 @@ void handle_uart_command(char* command) {
              if (!capture_mode && !rssi_mode) {
                 printf("Entering RSSI Mode\n");
                 uart_puts(UART_ID, "OK: RSSI Mode ON\n");
-                cc1101_strobe(CC1101_SRX);
+                // Initial strobe is handled by the main loop
                 rssi_mode = true;
             }
             break;
