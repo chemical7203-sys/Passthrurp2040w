@@ -70,38 +70,44 @@ void process_uart() {
 // Application must fill buffer report's content and return its length.
 // Return zero will cause the stack to STALL request
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen) {
-  (void) instance;
-  (void) report_id;
-  (void) report_type;
-  (void) buffer;
-  (void) reqlen;
-
+  // This is not used by the Switch Pro Controller communication protocol.
   return 0;
 }
 
 // Invoked when received SET_REPORT control request or
 // received data on OUT endpoint (Report ID = 0, Type = OUTPUT)
 void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize) {
-  (void) instance;
-  (void) report_id;
-  (void) report_type;
-  (void) buffer;
-  (void) bufsize;
+  // For Switch, SET_REPORT is used to send commands to the controller.
+  // We need to ACK them to keep the connection alive.
+  // This is a minimal implementation based on GP2040-CE's logic.
 
-  // echo back anything we received from host
-  // tud_hid_report(0, buffer, bufsize);
+  if (report_type != HID_REPORT_TYPE_OUTPUT) return;
+
+  uint8_t command_id = buffer[0];
+  uint8_t subcommand_id = 0;
+
+  uint8_t reply[64];
+  memset(reply, 0, sizeof(reply));
+
+  // Most replies are on report ID 0x21
+  reply[0] = 0x21;
+  reply[1] = report_counter; // Use the global counter from hid_task
+
+  if (command_id == 0x01) { // Rumble and Subcommand
+    subcommand_id = buffer[10];
+    reply[13] = 0x80; // Generic ACK
+    reply[14] = subcommand_id;
+    tud_hid_report(0, reply, sizeof(reply));
+  } else if (command_id == 0x10) { // Set Player Lights, etc.
+    subcommand_id = buffer[1];
+    reply[13] = 0x80; // Generic ACK
+    reply[14] = subcommand_id;
+    tud_hid_report(0, reply, sizeof(reply));
+  }
 }
 
 #if CFG_TUD_HID_NINTENDO
-uint8_t dpad_to_switch_hat(uint8_t dpad_mask) {
-    static const uint8_t hat_map[16] = {
-        SWITCH_HAT_NOTHING, SWITCH_HAT_UP, SWITCH_HAT_DOWN, SWITCH_HAT_NOTHING,
-        SWITCH_HAT_LEFT, SWITCH_HAT_UPLEFT, SWITCH_HAT_DOWNLEFT, SWITCH_HAT_NOTHING,
-        SWITCH_HAT_RIGHT, SWITCH_HAT_UPRIGHT, SWITCH_HAT_DOWNRIGHT, SWITCH_HAT_NOTHING,
-        SWITCH_HAT_NOTHING, SWITCH_HAT_NOTHING, SWITCH_HAT_NOTHING, SWITCH_HAT_NOTHING
-    };
-    return hat_map[dpad_mask & 0x0F];
-}
+// dpad_to_switch_hat is no longer used for Pro Controller mode.
 #elif CFG_TUD_HID_SONY
 uint8_t dpad_to_ds4_hat(uint8_t dpad_mask) {
     static const uint8_t hat_map[16] = {
@@ -130,32 +136,57 @@ void hid_task(void) {
   if ( tud_hid_ready() ) {
     #if CFG_TUD_HID_NINTENDO
       hid_nintendo_report_t report = {0};
+      report.report_id = 0x30;
+      report.timer = report_counter++; // Use the global report_counter
+      report.connection_info_battery_level = 0x80; // Full battery, wired connection
 
-      // Button mapping uses direct 1-to-1 logic.
-      // The padding fix should resolve any data corruption issues.
-      if (gamepad_data.buttons & (1 << 1)) report.buttons |= SWITCH_MASK_A;
-      if (gamepad_data.buttons & (1 << 0)) report.buttons |= SWITCH_MASK_B;
-      if (gamepad_data.buttons & (1 << 3)) report.buttons |= SWITCH_MASK_X;
-      if (gamepad_data.buttons & (1 << 2)) report.buttons |= SWITCH_MASK_Y;
-      if (gamepad_data.buttons & (1 << 4)) report.buttons |= SWITCH_MASK_L;
-      if (gamepad_data.buttons & (1 << 5)) report.buttons |= SWITCH_MASK_R;
-      if (gamepad_data.l2 > 30) report.buttons |= SWITCH_MASK_ZL;
-      if (gamepad_data.r2 > 30) report.buttons |= SWITCH_MASK_ZR;
-      if (gamepad_data.buttons & (1 << 8)) report.buttons |= SWITCH_MASK_MINUS;
-      if (gamepad_data.buttons & (1 << 9)) report.buttons |= SWITCH_MASK_PLUS;
-      if (gamepad_data.buttons & (1 << 10)) report.buttons |= SWITCH_MASK_L3;
-      if (gamepad_data.buttons & (1 << 11)) report.buttons |= SWITCH_MASK_R3;
-      if (gamepad_data.buttons & (1 << 12)) report.buttons |= SWITCH_MASK_HOME;
-      if (gamepad_data.buttons & (1 << 13)) report.buttons |= SWITCH_MASK_CAPTURE;
+      // Clear button data
+      report.inputs.buttons[0] = 0;
+      report.inputs.buttons[1] = 0;
+      report.inputs.buttons[2] = 0;
 
-      // D-pad
-      report.hat = dpad_to_switch_hat(gamepad_data.dpad);
+      // --- Button Mapping ---
+      // Byte 0: Y, X, B, A, R, ZR
+      if (gamepad_data.buttons & (1U << 2)) report.inputs.buttons[0] |= PRO_CONTROLLER_MASK_Y_0;
+      if (gamepad_data.buttons & (1U << 3)) report.inputs.buttons[0] |= PRO_CONTROLLER_MASK_X_0;
+      if (gamepad_data.buttons & (1U << 0)) report.inputs.buttons[0] |= PRO_CONTROLLER_MASK_B_0;
+      if (gamepad_data.buttons & (1U << 1)) report.inputs.buttons[0] |= PRO_CONTROLLER_MASK_A_0;
+      if (gamepad_data.buttons & BUTTON_MASK_R1) report.inputs.buttons[0] |= PRO_CONTROLLER_MASK_R_0;
+      if (gamepad_data.r2 > 30) report.inputs.buttons[0] |= PRO_CONTROLLER_MASK_ZR_0;
 
-      // Analog sticks
-      report.lx = gamepad_data.lx + 128;
-      report.ly = gamepad_data.ly + 128;
-      report.rx = gamepad_data.rx + 128;
-      report.ry = gamepad_data.ry + 128;
+      // Byte 1: -, +, R3, L3, Home, Capture
+      if (gamepad_data.buttons & BUTTON_MASK_SELECT) report.inputs.buttons[1] |= PRO_CONTROLLER_MASK_MINUS_1;
+      if (gamepad_data.buttons & BUTTON_MASK_START) report.inputs.buttons[1] |= PRO_CONTROLLER_MASK_PLUS_1;
+      if (gamepad_data.buttons & BUTTON_MASK_R3) report.inputs.buttons[1] |= PRO_CONTROLLER_MASK_R3_1;
+      if (gamepad_data.buttons & BUTTON_MASK_L3) report.inputs.buttons[1] |= PRO_CONTROLLER_MASK_L3_1;
+      if (gamepad_data.buttons & BUTTON_MASK_HOME) report.inputs.buttons[1] |= PRO_CONTROLLER_MASK_HOME_1;
+      if (gamepad_data.buttons & BUTTON_MASK_CAPTURE) report.inputs.buttons[1] |= PRO_CONTROLLER_MASK_CAPTURE_1;
+
+      // Byte 2: Dpad, L, ZL
+      if (gamepad_data.dpad & DPAD_MASK_DOWN) report.inputs.buttons[2] |= PRO_CONTROLLER_MASK_DPAD_DOWN_2;
+      if (gamepad_data.dpad & DPAD_MASK_UP) report.inputs.buttons[2] |= PRO_CONTROLLER_MASK_DPAD_UP_2;
+      if (gamepad_data.dpad & DPAD_MASK_RIGHT) report.inputs.buttons[2] |= PRO_CONTROLLER_MASK_DPAD_RIGHT_2;
+      if (gamepad_data.dpad & DPAD_MASK_LEFT) report.inputs.buttons[2] |= PRO_CONTROLLER_MASK_DPAD_LEFT_2;
+      if (gamepad_data.buttons & BUTTON_MASK_L1) report.inputs.buttons[2] |= PRO_CONTROLLER_MASK_L_2;
+      if (gamepad_data.l2 > 30) report.inputs.buttons[2] |= PRO_CONTROLLER_MASK_ZL_2;
+
+      // --- Analog Stick Mapping ---
+      // Scale signed 8-bit (-128 to 127) to unsigned 12-bit (0 to 4095)
+      uint16_t lx_scaled = (uint16_t)((gamepad_data.lx + 128) << 4);
+      uint16_t ly_scaled = (uint16_t)((gamepad_data.ly + 128) << 4);
+      uint16_t rx_scaled = (uint16_t)((gamepad_data.rx + 128) << 4);
+      uint16_t ry_scaled = (uint16_t)((gamepad_data.ry + 128) << 4);
+
+      // Invert Y axis for Switch standard
+      ly_scaled = 4095 - ly_scaled;
+      ry_scaled = 4095 - ry_scaled;
+
+      set_switch_analog_x(&report.inputs.left_stick, lx_scaled);
+      set_switch_analog_y(&report.inputs.left_stick, ly_scaled);
+      set_switch_analog_x(&report.inputs.right_stick, rx_scaled);
+      set_switch_analog_y(&report.inputs.right_stick, ry_scaled);
+
+      report.vibrator_report = 0;
 
       tud_hid_report(0, &report, sizeof(report));
     #elif CFG_TUD_HID_SONY
