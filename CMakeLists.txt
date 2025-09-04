@@ -23,9 +23,10 @@ if (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 # ====================================================================================
-set(PICO_BOARD pico_w CACHE STRING "Board type")
+set(PICO_BOARD pico CACHE STRING "Board type")
 
 # Pull in Raspberry Pi Pico SDK (must be before project)
+set(PICO_SDK_FETCH_FROM_GIT ON)
 include(pico_sdk_import.cmake)
 
 project(RP C CXX ASM)
@@ -35,7 +36,10 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(RP RP.c )
+add_executable(RP
+        RP.c
+        cc1101_driver.c
+        )
 
 pico_set_program_name(RP "RP")
 pico_set_program_version(RP "0.1")
@@ -57,14 +61,12 @@ target_include_directories(RP PRIVATE
 )
 
 # Add any user requested libraries
+# hardware_i2c, hardware_dma, etc are not needed for now
+# and will be added back in a later step.
 target_link_libraries(RP 
-        hardware_i2c
-        hardware_dma
-        hardware_pio
-        hardware_interp
         hardware_timer
-        hardware_clocks
-        pico_cyw43_arch_lwip_poll
+        hardware_spi
+        hardware_gpio
         )
 
 pico_add_extra_outputs(RP)
