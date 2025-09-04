@@ -121,7 +121,8 @@ void cc1101_configure() {
 
     // Asynchronous serial mode, variable packet length, CRC disabled
     cc1101_write_reg(CC1101_PKTCTRL0, 0x44);
-    cc1101_write_reg(CC1101_IOCFG0, 0x06);   // GDO0 asserts when sync word sent/received, de-asserts at end of packet
+    // Set GDO0 to assert when RX FIFO is filled above threshold. This is the key for packet capture without sync word.
+    cc1101_write_reg(CC1101_IOCFG0, 0x01);
 
     // Other settings
     cc1101_write_reg(CC1101_DEVIATN, 0x15);
