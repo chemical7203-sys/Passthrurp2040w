@@ -61,21 +61,27 @@ int main()
         }
 
         if (capture_mode) {
-            // Continuously poll the RXBYTES register to see if data is available
             uint8_t bytes_in_fifo = cc1101_read_status_reg(CC1101_RXBYTES) & CC1101_NUM_RXBYTES;
             if (bytes_in_fifo > 0) {
-                uint8_t packet_buffer[64];
-                cc1101_read_burst_reg(CC1101_RXFIFO, packet_buffer, bytes_in_fifo);
+                // First byte(s) detected. Wait a moment for the rest of the packet to arrive.
+                sleep_ms(30);
 
-                uart_puts(UART_ID, "R:");
-                for (int i = 0; i < bytes_in_fifo; i++) {
-                    char hex_byte[3];
-                    sprintf(hex_byte, "%02X", packet_buffer[i]);
-                    uart_puts(UART_ID, hex_byte);
+                // Now get the total number of bytes.
+                uint8_t total_bytes = cc1101_read_status_reg(CC1101_RXBYTES) & CC1101_NUM_RXBYTES;
+                if (total_bytes > 0) {
+                    uint8_t packet_buffer[64];
+                    cc1101_read_burst_reg(CC1101_RXFIFO, packet_buffer, total_bytes);
+
+                    uart_puts(UART_ID, "R:");
+                    for (int i = 0; i < total_bytes; i++) {
+                        char hex_byte[3];
+                        sprintf(hex_byte, "%02X", packet_buffer[i]);
+                        uart_puts(UART_ID, hex_byte);
+                    }
+                    uart_puts(UART_ID, "\n");
                 }
-                uart_puts(UART_ID, "\n");
 
-                // Flush the FIFO to be safe, although reading should have emptied it
+                // Flush the FIFO to be ready for the next signal
                 cc1101_strobe(CC1101_SFRX);
             }
         } else if (rssi_mode) {
