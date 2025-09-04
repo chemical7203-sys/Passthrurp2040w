@@ -61,21 +61,22 @@ int main()
         }
 
         if (capture_mode) {
-            if (gpio_get(CC1101_PIN_GDO0)) {
-                uint8_t bytes_in_fifo = cc1101_read_status_reg(CC1101_RXBYTES) & CC1101_NUM_RXBYTES;
-                if (bytes_in_fifo > 0) {
-                    uint8_t packet_buffer[64];
-                    cc1101_read_burst_reg(CC1101_RXFIFO, packet_buffer, bytes_in_fifo);
-                    uart_puts(UART_ID, "R:");
-                    for (int i = 0; i < bytes_in_fifo; i++) {
-                        char hex_byte[3];
-                        sprintf(hex_byte, "%02X", packet_buffer[i]);
-                        uart_puts(UART_ID, hex_byte);
-                    }
-                    uart_puts(UART_ID, "\n");
+            // Continuously poll the RXBYTES register to see if data is available
+            uint8_t bytes_in_fifo = cc1101_read_status_reg(CC1101_RXBYTES) & CC1101_NUM_RXBYTES;
+            if (bytes_in_fifo > 0) {
+                uint8_t packet_buffer[64];
+                cc1101_read_burst_reg(CC1101_RXFIFO, packet_buffer, bytes_in_fifo);
+
+                uart_puts(UART_ID, "R:");
+                for (int i = 0; i < bytes_in_fifo; i++) {
+                    char hex_byte[3];
+                    sprintf(hex_byte, "%02X", packet_buffer[i]);
+                    uart_puts(UART_ID, hex_byte);
                 }
+                uart_puts(UART_ID, "\n");
+
+                // Flush the FIFO to be safe, although reading should have emptied it
                 cc1101_strobe(CC1101_SFRX);
-                cc1101_strobe(CC1101_SRX);
             }
         } else if (rssi_mode) {
             // Force re-calibration of the receiver by cycling between IDLE and RX
@@ -103,8 +104,11 @@ void handle_uart_command(char* command) {
         case 'C':
             if (!capture_mode && !rssi_mode) {
                 printf("Entering Capture Mode\n");
-                uart_puts(UART_ID, "OK: Capture Mode ON\n");
+                // Flush buffer before starting capture to remove old noise
+                cc1101_strobe(CC1101_SIDLE);
+                cc1101_strobe(CC1101_SFRX);
                 cc1101_strobe(CC1101_SRX);
+                uart_puts(UART_ID, "OK: Capture Mode ON\n");
                 capture_mode = true;
             }
             break;
@@ -112,7 +116,6 @@ void handle_uart_command(char* command) {
              if (!capture_mode && !rssi_mode) {
                 printf("Entering RSSI Mode\n");
                 uart_puts(UART_ID, "OK: RSSI Mode ON\n");
-                // Initial strobe is handled by the main loop
                 rssi_mode = true;
             }
             break;
