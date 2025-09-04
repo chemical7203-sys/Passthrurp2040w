@@ -115,14 +115,15 @@ void cc1101_configure() {
     // Set widest possible RX filter bandwidth to catch signals that might be off-frequency
     cc1101_write_reg(CC1101_MDMCFG4, 0x08); // RX filter BW = 812 KHz (widest setting)
     cc1101_write_reg(CC1101_MDMCFG3, 0x21); // Data rate = 2.4 kBaud
-    cc1101_write_reg(CC1101_MDMCFG2, 0x30); // ASK modulation, no sync/preamble
+    // Set to ASK/OOK, No preamble/sync
+    cc1101_write_reg(CC1101_MDMCFG2, 0x30);
     cc1101_write_reg(CC1101_MDMCFG1, 0x22); // No FEC
     cc1101_write_reg(CC1101_MDMCFG0, 0xF8); // Channel spacing = 200 kHz
 
-    // Asynchronous serial mode, variable packet length, CRC disabled
-    cc1101_write_reg(CC1101_PKTCTRL0, 0x44);
-    // Set GDO0 to assert when RX FIFO is filled above threshold. This is the key for packet capture without sync word.
-    cc1101_write_reg(CC1101_IOCFG0, 0x01);
+    // Disable all packet handling features for raw mode
+    cc1101_write_reg(CC1101_PKTCTRL0, 0x00);
+    // Set GDO0 to output the raw, demodulated serial data stream
+    cc1101_write_reg(CC1101_IOCFG0, 0x0D);
 
     // Other settings
     cc1101_write_reg(CC1101_DEVIATN, 0x15);

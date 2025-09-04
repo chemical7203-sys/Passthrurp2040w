@@ -13,18 +13,21 @@
 #define UART_RX_PIN 5
 
 // --- Global State ---
+#define PULSE_BUFFER_SIZE 512
 volatile bool capture_mode = false;
 volatile bool rssi_mode = false;
 char uart_rx_buffer[128];
 uint8_t uart_rx_index = 0;
+uint32_t pulse_buffer[PULSE_BUFFER_SIZE];
+uint16_t pulse_count = 0;
+
 
 // --- Function Prototypes ---
 void setup_uart();
 void handle_uart_command(char* command);
 void dump_registers();
+void capture_pulses();
 int16_t convert_rssi(uint8_t rssi_dec);
-uint8_t hex_char_to_int(char c);
-void hex_string_to_bytes(const char* hex_str, uint8_t* byte_array, uint8_t* byte_count);
 
 void setup_uart() {
     uart_init(UART_ID, BAUD_RATE);
@@ -42,11 +45,10 @@ int main()
     cc1101_init();
     cc1101_configure();
     
-    printf("CC1101 Initialized and Configured.\n");
+    printf("CC1101 Initialized and Configured for Raw Mode.\n");
     uart_puts(UART_ID, "CC1101 Ready.\n");
 
     while (true) {
-        // Check for incoming UART commands
         if (uart_is_readable(UART_ID)) {
             char c = uart_getc(UART_ID);
             if (c == '\n' || c == '\r') {
@@ -61,31 +63,12 @@ int main()
         }
 
         if (capture_mode) {
-            uint8_t bytes_in_fifo = cc1101_read_status_reg(CC1101_RXBYTES) & CC1101_NUM_RXBYTES;
-            if (bytes_in_fifo > 0) {
-                // First byte(s) detected. Wait a moment for the rest of the packet to arrive.
-                sleep_ms(30);
-
-                // Now get the total number of bytes.
-                uint8_t total_bytes = cc1101_read_status_reg(CC1101_RXBYTES) & CC1101_NUM_RXBYTES;
-                if (total_bytes > 0) {
-                    uint8_t packet_buffer[64];
-                    cc1101_read_burst_reg(CC1101_RXFIFO, packet_buffer, total_bytes);
-
-                    uart_puts(UART_ID, "R:");
-                    for (int i = 0; i < total_bytes; i++) {
-                        char hex_byte[3];
-                        sprintf(hex_byte, "%02X", packet_buffer[i]);
-                        uart_puts(UART_ID, hex_byte);
-                    }
-                    uart_puts(UART_ID, "\n");
-                }
-
-                // Flush the FIFO to be ready for the next signal
-                cc1101_strobe(CC1101_SFRX);
-            }
+            capture_pulses();
+            // After capture is done, exit capture mode automatically
+            capture_mode = false;
+            uart_puts(UART_ID, "OK: Capture Finished\n");
+            printf("Capture finished.\n");
         } else if (rssi_mode) {
-            // Force re-calibration of the receiver by cycling between IDLE and RX
             cc1101_strobe(CC1101_SIDLE);
             sleep_us(500);
             cc1101_strobe(CC1101_SRX);
@@ -96,9 +79,9 @@ int main()
             char rssi_msg[32];
             sprintf(rssi_msg, "RSSI_DBM:%d\n", rssi_dbm);
             uart_puts(UART_ID, rssi_msg);
-            sleep_ms(100); // Control overall loop speed
+            sleep_ms(100);
         } else {
-            sleep_ms(10); // Not in a continuous mode, sleep briefly
+            sleep_ms(10);
         }
     }
     return 0;
@@ -109,12 +92,8 @@ void handle_uart_command(char* command) {
     switch(command[0]) {
         case 'C':
             if (!capture_mode && !rssi_mode) {
-                printf("Entering Capture Mode\n");
-                // Flush buffer before starting capture to remove old noise
-                cc1101_strobe(CC1101_SIDLE);
-                cc1101_strobe(CC1101_SFRX);
-                cc1101_strobe(CC1101_SRX);
-                uart_puts(UART_ID, "OK: Capture Mode ON\n");
+                printf("Entering Raw Pulse Capture Mode\n");
+                uart_puts(UART_ID, "OK: Capturing raw pulses... Press remote.\n");
                 capture_mode = true;
             }
             break;
@@ -126,43 +105,76 @@ void handle_uart_command(char* command) {
             }
             break;
         case 'E':
-            if (capture_mode || rssi_mode) {
-                printf("Exiting Continuous Mode\n");
+            if (rssi_mode) { // Only 'E' for RSSI mode now
+                printf("Exiting RSSI Mode\n");
                 uart_puts(UART_ID, "OK: Mode OFF\n");
                 cc1101_strobe(CC1101_SIDLE);
-                capture_mode = false;
                 rssi_mode = false;
             }
             break;
         case 'D':
             dump_registers();
             break;
-        case 'T':
-            if (command[1] == ',') {
-                const char* hex_data = command + 2;
-                uint8_t data_to_send[64];
-                uint8_t data_len = 0;
-                hex_string_to_bytes(hex_data, data_to_send, &data_len);
-                if (data_len > 0) {
-                    printf("Transmitting %d bytes\n", data_len);
-                    cc1101_strobe(CC1101_SIDLE);
-                    cc1101_write_reg(CC1101_PKTLEN, data_len);
-                    cc1101_write_burst_reg(CC1101_TXFIFO, data_to_send, data_len);
-                    cc1101_strobe(CC1101_STX);
-                    sleep_ms(100);
-                    uart_puts(UART_ID, "OK: Transmitted\n");
-                } else {
-                    uart_puts(UART_ID, "ERR: Invalid hex data\n");
-                }
-            } else {
-                 uart_puts(UART_ID, "ERR: Invalid transmit format\n");
-            }
-            break;
+        // 'T' command is temporarily disabled as it needs new logic for pulse trains
         default:
-            uart_puts(UART_ID, "ERR: Unknown command\n");
+            uart_puts(UART_ID, "ERR: Unknown or disabled command\n");
             break;
     }
 }
+
+void capture_pulses() {
+    pulse_count = 0;
+
+    // Put radio in RX mode
+    cc1101_strobe(CC1101_SRX);
+
+    // Wait for the first edge (transition from idle low to high)
+    // Timeout after 2 seconds if no signal
+    uint32_t start_time = time_us_32();
+    while(!gpio_get(CC1101_PIN_GDO0)) {
+        if (time_us_32() - start_time > 2000000) {
+            uart_puts(UART_ID, "ERR: Capture timed out waiting for signal.\n");
+            cc1101_strobe(CC1101_SIDLE);
+            return;
+        }
+    }
+
+    // Start capturing edges
+    bool current_state = gpio_get(CC1101_PIN_GDO0);
+    uint32_t last_edge_time = time_us_32();
+
+    // Capture for a max of 3 seconds or until buffer is full
+    while(pulse_count < PULSE_BUFFER_SIZE && (time_us_32() - start_time < 5000000)) {
+        bool new_state = gpio_get(CC1101_PIN_GDO0);
+        if (new_state != current_state) {
+            uint32_t now = time_us_32();
+            uint32_t duration = now - last_edge_time;
+            pulse_buffer[pulse_count++] = duration;
+            last_edge_time = now;
+            current_state = new_state;
+        }
+        // Timeout between edges (end of transmission)
+        if (time_us_32() - last_edge_time > 100000) { // 100ms
+            break;
+        }
+    }
+
+    cc1101_strobe(CC1101_SIDLE);
+
+    // Send captured pulse data to PC
+    if (pulse_count > 0) {
+        char temp_buf[20];
+        uart_puts(UART_ID, "PULSE:");
+        for (int i = 0; i < pulse_count; i++) {
+            sprintf(temp_buf, "%lu,", pulse_buffer[i]);
+            uart_puts(UART_ID, temp_buf);
+        }
+        uart_puts(UART_ID, "\n");
+    } else {
+        uart_puts(UART_ID, "ERR: No pulses captured.\n");
+    }
+}
+
 
 void dump_registers() {
     uart_puts(UART_ID, "--- CC1101 Registers ---\n");
@@ -183,24 +195,4 @@ int16_t convert_rssi(uint8_t rssi_raw) {
         rssi_dbm = (rssi_raw / 2) - 74;
     }
     return rssi_dbm;
-}
-
-uint8_t hex_char_to_int(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return 0;
-}
-
-void hex_string_to_bytes(const char* hex_str, uint8_t* byte_array, uint8_t* byte_count) {
-    *byte_count = 0;
-    size_t len = strlen(hex_str);
-    if (len % 2 != 0) return;
-    for (size_t i = 0; i < len; i += 2) {
-        uint8_t high = hex_char_to_int(hex_str[i]);
-        uint8_t low = hex_char_to_int(hex_str[i+1]);
-        byte_array[*byte_count] = (high << 4) | low;
-        (*byte_count)++;
-        if (*byte_count >= 64) break;
-    }
 }
