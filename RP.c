@@ -10,6 +10,7 @@
 
 #if CFG_TUD_HID_SONY
 #include "ds4_report.h"
+#include "ps4_auth.h"
 #elif CFG_TUD_HID_NINTENDO
 #include "switch_report.h"
 #endif
@@ -26,7 +27,16 @@ typedef struct __attribute__((packed)) {
 } gamepad_data_v2_t;
 
 static gamepad_data_v2_t gamepad_data;
+
+#if CFG_TUD_HID_SONY
+// Global structs for DS4 report and authentication data
+static PS4Report ps4_report;
+static PS4AuthData ps4_auth_data;
+static uint8_t last_report_counter = 0;
+#else
 static uint8_t report_counter = 0;
+#endif
+
 
 #define UART_ID uart1
 #define BAUD_RATE 115200
@@ -66,15 +76,111 @@ void process_uart() {
     }
 }
 
+// TODO: Replace with a proper CRC32 implementation from a library
+uint32_t CRC32_calculate(const uint8_t* data, uint32_t size) {
+    uint32_t crc = 0xFFFFFFFF;
+    for (uint32_t i = 0; i < size; i++) {
+        uint8_t ch = data[i];
+        for (uint32_t j = 0; j < 8; j++) {
+            uint32_t b = (ch ^ crc) & 1;
+            crc >>= 1;
+            if (b) crc = crc ^ 0xEDB88320;
+            ch >>= 1;
+        }
+    }
+    return ~crc;
+}
+
+
+#if CFG_TUD_HID_SONY
+// Pre-defined responses for authentication feature reports
+static const uint8_t output_0x03[] = {
+    0x21, 0x27, 0x04, 0xcf, 0x00, 0x2c, 0x56,
+    0x08, 0x00, 0x3d, 0x00, 0xe8, 0x03, 0x04, 0x00,
+    0xff, 0x7f, 0x0d, 0x0d, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
+static const uint8_t output_0xa3[] = {
+    0x4a, 0x75, 0x6e, 0x20, 0x20, 0x39, 0x20, 0x32,
+    0x30, 0x31, 0x37, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x31, 0x32, 0x3a, 0x33, 0x36, 0x3a, 0x34, 0x31,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x01, 0x08, 0xb4, 0x01, 0x00, 0x00, 0x00,
+    0x07, 0xa0, 0x10, 0x20, 0x00, 0xa0, 0x02, 0x00
+};
+
+static uint8_t cur_nonce_chunk = 0;
+#endif
+
 // Invoked when received GET_REPORT control request
 // Application must fill buffer report's content and return its length.
 // Return zero will cause the stack to STALL request
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen) {
   (void) instance;
+
+#if CFG_TUD_HID_SONY
+  // All other reports are feature reports for authentication
+  if (report_type != HID_REPORT_TYPE_FEATURE) {
+      return 0;
+  }
+
+  uint8_t data[64] = {0};
+  uint32_t crc32;
+
+  switch (report_id) {
+    case 0x03: // PS4_DEFINITION
+      memcpy(buffer, output_0x03, sizeof(output_0x03));
+      return sizeof(output_0x03);
+
+    case 0xA3: // PS4_GET_VERSION_DATE
+      memcpy(buffer, output_0xa3, sizeof(output_0xa3));
+      return sizeof(output_0xa3);
+
+    case 0xF1: // PS4_GET_SIGNATURE_NONCE
+      data[0] = 0xF1;
+      data[1] = ps4_auth_data.nonce_id;
+      data[2] = cur_nonce_chunk;
+      data[3] = 0;
+
+      memcpy(&data[4], &ps4_auth_data.ps4_auth_buffer[cur_nonce_chunk * 56], 56);
+      crc32 = CRC32_calculate(data, 60);
+      memcpy(&data[60], &crc32, sizeof(uint32_t));
+
+      memcpy(buffer, &data[1], 63);
+      cur_nonce_chunk++;
+      if (cur_nonce_chunk == 19) {
+        ps4_auth_data.passthrough_state = auth_idle_state;
+        cur_nonce_chunk = 0;
+      }
+      return 63;
+
+    case 0xF2: // PS4_GET_SIGNING_STATE
+      data[0] = 0xF2;
+      data[1] = ps4_auth_data.nonce_id;
+      data[2] = (ps4_auth_data.passthrough_state == send_auth_dongle_to_console) ? 0 : 16;
+      memset(&data[3], 0, 9);
+      crc32 = CRC32_calculate(data, 12);
+      memcpy(&data[12], &crc32, sizeof(uint32_t));
+      memcpy(buffer, &data[1], 15);
+      return 15;
+
+    case 0xF3: // PS4_RESET_AUTH
+      ps4_auth_reset(&ps4_auth_data);
+      return 0; // Stall
+
+    default:
+      break;
+  }
+
+#else
   (void) report_id;
   (void) report_type;
   (void) buffer;
   (void) reqlen;
+#endif
 
   return 0;
 }
@@ -83,13 +189,46 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_t
 // received data on OUT endpoint (Report ID = 0, Type = OUTPUT)
 void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize) {
   (void) instance;
+
+#if CFG_TUD_HID_SONY
+  // We only handle FEATURE reports
+  if (report_type != HID_REPORT_TYPE_FEATURE) {
+    return;
+  }
+
+  // The host is sending us a nonce to sign
+  if (report_id == 0xF0) { // PS4_SET_AUTH_PAYLOAD
+    // TODO: Implement CRC32 check on the buffer as in GP2040-CE
+
+    // The nonce is received in chunks.
+    // buffer[0] is nonce_id, buffer[1] is nonce_page
+    uint8_t nonce_id = buffer[0];
+    uint8_t nonce_page = buffer[1];
+
+    // On the first page, we reset our state
+    if (nonce_page == 0) {
+      ps4_auth_data.nonce_id = nonce_id;
+    } else if (nonce_id != ps4_auth_data.nonce_id) {
+      // If the nonce ID changes unexpectedly, reset auth state
+      ps4_auth_reset(&ps4_auth_data);
+      return;
+    }
+
+    // Copy the nonce data into our buffer
+    if (nonce_page < 4) { // Pages 0-3 are 56 bytes
+        memcpy(&ps4_auth_data.ps4_auth_buffer[nonce_page * 56], &buffer[3], 56);
+    } else if (nonce_page == 4) { // Page 4 is 32 bytes
+        memcpy(&ps4_auth_data.ps4_auth_buffer[nonce_page * 56], &buffer[3], 32);
+        // This is the last chunk, so we trigger the signing process
+        ps4_auth_data.passthrough_state = send_auth_console_to_dongle;
+    }
+  }
+#else
   (void) report_id;
   (void) report_type;
   (void) buffer;
   (void) bufsize;
-
-  // echo back anything we received from host
-  // tud_hid_report(0, buffer, bufsize);
+#endif
 }
 
 #if CFG_TUD_HID_NINTENDO
@@ -160,45 +299,68 @@ void hid_task(void) {
       tud_hid_report(0, &report, sizeof(report));
     #elif CFG_TUD_HID_SONY
       hid_ds4_report_t report = {0};
-      report.report_id = 1;
-      report.left_stick_x = gamepad_data.lx + 128;
-      report.left_stick_y = gamepad_data.ly + 128;
-      report.right_stick_x = gamepad_data.rx + 128;
-      report.right_stick_y = gamepad_data.ry + 128;
-      report.l2_trigger = gamepad_data.l2;
-      report.r2_trigger = gamepad_data.r2;
-      report.dpad = dpad_to_ds4_hat(gamepad_data.dpad);
+      // Process any pending authentication tasks
+      ps4_auth_process(&ps4_auth_data);
 
-      if (gamepad_data.buttons & (1 << 0))  report.square = 1;
-      if (gamepad_data.buttons & (1 << 1))  report.cross = 1;
-      if (gamepad_data.buttons & (1 << 2))  report.circle = 1;
-      if (gamepad_data.buttons & (1 << 3))  report.triangle = 1;
-      if (gamepad_data.buttons & (1 << 4))  report.l1 = 1;
-      if (gamepad_data.buttons & (1 << 5))  report.r1 = 1;
-      if (gamepad_data.buttons & (1 << 6))  report.l2 = 1;
-      if (gamepad_data.buttons & (1 << 7))  report.r2 = 1;
-      if (gamepad_data.buttons & (1 << 8))  report.share = 1;
-      if (gamepad_data.buttons & (1 << 9))  report.options = 1;
-      if (gamepad_data.buttons & (1 << 10)) report.l3 = 1;
-      if (gamepad_data.buttons & (1 << 11)) report.r3 = 1;
-      if (gamepad_data.buttons & (1 << 12)) report.ps = 1;
-      if (gamepad_data.buttons & (1 << 13)) report.tpad = 1;
+      // Map UART data to the DS4 report structure
+      ps4_report.report_id = 1;
+      ps4_report.left_stick_x = gamepad_data.lx + 128;
+      ps4_report.left_stick_y = gamepad_data.ly + 128;
+      ps4_report.right_stick_x = gamepad_data.rx + 128;
+      ps4_report.right_stick_y = gamepad_data.ry + 128;
+      ps4_report.l2_trigger = gamepad_data.l2;
+      ps4_report.r2_trigger = gamepad_data.r2;
 
-      report.report_counter = report_counter++;
+      // DPAD
+      ps4_report.dpad = dpad_to_ds4_hat(gamepad_data.dpad);
+
+      // Buttons - we reset them all and then set the ones that are pressed
+      ps4_report.square = 0;
+      ps4_report.cross = 0;
+      ps4_report.circle = 0;
+      ps4_report.triangle = 0;
+      ps4_report.l1 = 0;
+      ps4_report.r1 = 0;
+      ps4_report.l2 = 0;
+      ps4_report.r2 = 0;
+      ps4_report.share = 0;
+      ps4_report.options = 0;
+      ps4_report.l3 = 0;
+      ps4_report.r3 = 0;
+      ps4_report.ps = 0;
+      ps4_report.tpad = 0;
+
+      if (gamepad_data.buttons & (1 << 0))  ps4_report.square = 1;
+      if (gamepad_data.buttons & (1 << 1))  ps4_report.cross = 1;
+      if (gamepad_data.buttons & (1 << 2))  ps4_report.circle = 1;
+      if (gamepad_data.buttons & (1 << 3))  ps4_report.triangle = 1;
+      if (gamepad_data.buttons & (1 << 4))  ps4_report.l1 = 1;
+      if (gamepad_data.buttons & (1 << 5))  ps4_report.r1 = 1;
+      if (gamepad_data.l2 > 30)             ps4_report.l2 = 1;
+      if (gamepad_data.r2 > 30)             ps4_report.r2 = 1;
+      if (gamepad_data.buttons & (1 << 8))  ps4_report.share = 1;
+      if (gamepad_data.buttons & (1 << 9))  ps4_report.options = 1;
+      if (gamepad_data.buttons & (1 << 10)) ps4_report.l3 = 1;
+      if (gamepad_data.buttons & (1 << 11)) ps4_report.r3 = 1;
+      if (gamepad_data.buttons & (1 << 12)) ps4_report.ps = 1;
+      if (gamepad_data.buttons & (1 << 13)) ps4_report.tpad = 1;
+
+      // Keep-alive and report counter
+      ps4_report.report_counter = last_report_counter++;
 
       // Gyro and accelerometer data - set to zero as not provided by UART
-      report.accel_x = 0;
-      report.accel_y = 0;
-      report.accel_z = 0;
-      report.gyro_x = 0;
-      report.gyro_y = 0;
-      report.gyro_z = 0;
+      ps4_report.accel_x = 0;
+      ps4_report.accel_y = 0;
+      ps4_report.accel_z = 0;
+      ps4_report.gyro_x = 0;
+      ps4_report.gyro_y = 0;
+      ps4_report.gyro_z = 0;
 
       // Touchpad data - set to not touched
-      report.touchpad.p1.unpressed = 1;
-      report.touchpad.p2.unpressed = 1;
+      ps4_report.touchpad.p1.unpressed = 1;
+      ps4_report.touchpad.p2.unpressed = 1;
 
-      tud_hid_report(0, &report, sizeof(report));
+      tud_hid_report(0, &ps4_report, sizeof(ps4_report));
     #else // GENERIC
       hid_gamepad_report_t report = {0};
       report.buttons = gamepad_data.buttons;
@@ -234,6 +396,11 @@ int main() {
     board_init();
     setup_uart();
     tusb_init();
+
+#if CFG_TUD_HID_SONY
+    ps4_auth_initialize(&ps4_auth_data);
+#endif
+
     while (true) {
         tud_task();
         hid_task();

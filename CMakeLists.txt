@@ -31,7 +31,7 @@ include(pico_sdk_import.cmake)
 project(RP C CXX ASM)
 
 # --- Add build-time option for output mode ---
-set(OUTPUT_MODE "GENERIC" CACHE STRING "Gamepad output mode (GENERIC, SWITCH, DS4)")
+set(OUTPUT_MODE "DS4" CACHE STRING "Gamepad output mode (GENERIC, SWITCH, DS4)")
 set_property(CACHE OUTPUT_MODE PROPERTY STRINGS "GENERIC" "SWITCH" "DS4")
 message(STATUS "Gamepad Output Mode set to: ${OUTPUT_MODE}")
 
@@ -42,6 +42,7 @@ pico_sdk_init()
 add_executable(RP
         RP.c
         usb_descriptors.c
+        ps4_auth.c
         )
 
 # Add compile definitions based on the selected output mode
@@ -85,6 +86,7 @@ target_link_libraries(RP
         pico_cyw43_arch_lwip_poll
         tinyusb_device
         tinyusb_board
+        pico_mbedtls
         )
 
 pico_add_extra_outputs(RP)
