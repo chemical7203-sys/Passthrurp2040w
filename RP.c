@@ -18,7 +18,7 @@
 volatile bool capture_mode = false;
 volatile bool rssi_mode = false;
 volatile bool scan_mode = false;
-char uart_rx_buffer[8192]; // Increased buffer size to prevent overflow from long pulse trains
+char uart_rx_buffer[8192];
 uint16_t uart_rx_index = 0;
 uint32_t pulse_buffer[PULSE_BUFFER_SIZE];
 uint16_t pulse_count = 0;
@@ -32,6 +32,18 @@ void capture_pulses();
 void transmit_pulses(char* data);
 void scan_frequencies(char* data);
 int16_t convert_rssi(uint8_t rssi_dec);
+
+// A safer way to get the next token from a comma-separated string
+char* safe_strtok(char** str, const char* delim) {
+    if (*str == NULL) return NULL;
+    char* token_start = *str;
+    *str = strpbrk(token_start, delim);
+    if (*str) {
+        **str = '\0';
+        (*str)++;
+    }
+    return token_start;
+}
 
 void setup_uart() {
     uart_init(UART_ID, BAUD_RATE);
@@ -141,39 +153,39 @@ void handle_uart_command(char* command) {
 }
 
 void transmit_pulses(char* data) {
-    printf("[TX_DEBUG] Entered transmit_pulses function.\n");
     uart_puts(UART_ID, "OK: Transmitting pulses...\n");
 
     gpio_init(CC1101_PIN_GDO0);
     gpio_set_dir(CC1101_PIN_GDO0, GPIO_OUT);
-    printf("[TX_DEBUG] GDO0 configured as output.\n");
 
     cc1101_strobe(CC1101_STX);
-    printf("[TX_DEBUG] Radio in TX mode.\n");
 
     bool state = true;
 
-    printf("[TX_DEBUG] Parsing and transmitting loop starting...\n");
-    char* token = strtok(data, ",");
+    char* p = data;
+    char* token;
     int pulse_num = 0;
-    while(token != NULL) {
+    while((token = safe_strtok(&p, ",")) != NULL) {
+        if (*token == '\0') continue;
         uint32_t duration = atoi(token);
         if (duration > 0) {
-            // printf("[TX_DEBUG] Pulse %d: %lu us\n", pulse_num++, duration);
             gpio_put(CC1101_PIN_GDO0, state);
             busy_wait_us_32(duration);
             state = !state;
+            pulse_num++;
+            if (pulse_num % 20 == 0) {
+                char status_msg[32];
+                sprintf(status_msg, "TX_STATUS: Sent pulse %d\n", pulse_num);
+                uart_puts(UART_ID, status_msg);
+            }
         }
-        token = strtok(NULL, ",");
     }
-    printf("[TX_DEBUG] Loop finished.\n");
 
     gpio_put(CC1101_PIN_GDO0, 0);
 
     cc1101_strobe(CC1101_SIDLE);
     gpio_init(CC1101_PIN_GDO0);
     gpio_set_dir(CC1101_PIN_GDO0, GPIO_IN);
-    printf("[TX_DEBUG] GDO0 reconfigured as input. TX complete.\n");
 
     uart_puts(UART_ID, "OK: Transmission finished.\n");
 }
@@ -182,9 +194,12 @@ void transmit_pulses(char* data) {
 void scan_frequencies(char* data) {
     scan_mode = true;
     uart_puts(UART_ID, "OK: Starting frequency scan. Hold remote button.\n");
-    char* start_str = strtok(data, ",");
-    char* end_str = strtok(NULL, ",");
-    char* step_str = strtok(NULL, ",");
+
+    char* p = data;
+    char* start_str = safe_strtok(&p, ",");
+    char* end_str = safe_strtok(&p, ",");
+    char* step_str = safe_strtok(&p, ",");
+
     if (!start_str || !end_str || !step_str) {
         uart_puts(UART_ID, "ERR: Missing scan parameters.\n");
         scan_mode = false;
