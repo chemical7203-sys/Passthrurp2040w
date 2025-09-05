@@ -73,6 +73,7 @@ class DS4Handler(threading.Thread):
         for i in range(count):
             try:
                 joystick = pygame.joystick.Joystick(i)
+                joystick.init() # Initialize the joystick before getting info
                 self.joysticks.append(joystick) # Store the object
                 gamepads_info.append({'name': joystick.get_name(), 'index': i})
             except pygame.error as e:
