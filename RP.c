@@ -18,7 +18,7 @@
 volatile bool capture_mode = false;
 volatile bool rssi_mode = false;
 volatile bool scan_mode = false;
-char uart_rx_buffer[2048];
+char uart_rx_buffer[8192]; // Increased buffer size to prevent overflow from long pulse trains
 uint16_t uart_rx_index = 0;
 uint32_t pulse_buffer[PULSE_BUFFER_SIZE];
 uint16_t pulse_count = 0;
