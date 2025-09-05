@@ -13,26 +13,17 @@
 //--------------------------------------------------------------------+
 #if CFG_TUD_HID_NINTENDO
 // Switch Pro Controller Device Descriptor
-static const uint8_t desc_device_pro[] =
-{
-    0x12,        // bLength
-    0x01,        // bDescriptorType (Device)
-    0x00, 0x02,  // bcdUSB 2.00
-    0x00,        // bDeviceClass (Use class information in the Interface Descriptors)
-    0x00,        // bDeviceSubClass
-    0x00,        // bDeviceProtocol
-    0x40,        // bMaxPacketSize0 64
-    0x7E, 0x05,  // idVendor 0x057E
-    0x09, 0x20,  // idProduct 0x2009
-    0x10, 0x02,  // bcdDevice 2.10
-    0x01,        // iManufacturer (String Index)
-    0x02,        // iProduct (String Index)
-    0x03,        // iSerialNumber (String Index)
-    0x01,        // bNumConfigurations 1
+tusb_desc_device_t const desc_device = {
+    .bLength = sizeof(tusb_desc_device_t), .bDescriptorType = TUSB_DESC_DEVICE, .bcdUSB = 0x0200,
+    .bDeviceClass = 0x00, .bDeviceSubClass = 0x00, .bDeviceProtocol = 0x00,
+    .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
+    .idVendor = 0x057E, .idProduct = 0x2009, .bcdDevice = 0x0210,
+    .iManufacturer = 0x01, .iProduct = 0x02, .iSerialNumber = 0x03,
+    .bNumConfigurations = 0x01
 };
 #elif CFG_TUD_HID_SONY
 // DS4 Device Descriptor
-tusb_desc_device_t const desc_device_sony = {
+tusb_desc_device_t const desc_device = {
     .bLength = sizeof(tusb_desc_device_t), .bDescriptorType = TUSB_DESC_DEVICE, .bcdUSB = 0x0200,
     .bDeviceClass = 0x00, .bDeviceSubClass = 0x00, .bDeviceProtocol = 0x00,
     .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
@@ -42,7 +33,7 @@ tusb_desc_device_t const desc_device_sony = {
 };
 #else
 // Generic Device Descriptor
-tusb_desc_device_t const desc_device_generic = {
+tusb_desc_device_t const desc_device = {
     .bLength = sizeof(tusb_desc_device_t), .bDescriptorType = TUSB_DESC_DEVICE, .bcdUSB = 0x0200,
     .bDeviceClass = 0x00, .bDeviceSubClass = 0x00, .bDeviceProtocol = 0x00,
     .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
@@ -52,15 +43,7 @@ tusb_desc_device_t const desc_device_generic = {
 };
 #endif
 
-uint8_t const * tud_descriptor_device_cb(void) {
-#if CFG_TUD_HID_NINTENDO
-    return desc_device_pro;
-#elif CFG_TUD_HID_SONY
-    return (uint8_t const *) &desc_device_sony;
-#else
-    return (uint8_t const *) &desc_device_generic;
-#endif
-}
+uint8_t const * tud_descriptor_device_cb(void) { return (uint8_t const *) &desc_device; }
 
 //--------------------------------------------------------------------+
 // HID Report Descriptors
