@@ -14,12 +14,13 @@
 #define UART_RX_PIN 5
 
 // --- Global State ---
-#define SAMPLE_RATE_US 2 // Sample every 2 microseconds (500 KHz)
-#define SAMPLE_BUFFER_SIZE 32768 // 32KB buffer -> ~0.5 seconds of capture
+#define SAMPLE_RATE_US 2
+#define SAMPLE_BUFFER_SIZE 32768 // 32KB buffer
+#define TOTAL_SAMPLES (SAMPLE_BUFFER_SIZE * 8)
 #define PULSE_BUFFER_SIZE 1024
 
 volatile bool capture_mode = false;
-char uart_rx_buffer[8192]; // Large buffer for receiving pulse train for TX
+char uart_rx_buffer[8192];
 uint16_t uart_rx_index = 0;
 uint8_t sample_buffer[SAMPLE_BUFFER_SIZE];
 uint32_t pulse_buffer[PULSE_BUFFER_SIZE];
@@ -78,7 +79,7 @@ int main()
             capture_mode = false; // Auto-stop after capture
         }
 
-        sleep_ms(10); // Yield for a moment
+        sleep_ms(10);
     }
     return 0;
 }
@@ -87,7 +88,7 @@ void handle_uart_command(char* command) {
     printf("Handling command: %s\n", command);
     if (strcmp(command, "C") == 0) {
         if (!capture_mode) {
-            uart_puts(UART_ID, "OK: Starting capture... Press remote.\n");
+            uart_puts(UART_ID, "OK: Recording... Press remote button now.\n");
             capture_mode = true;
         }
     } else if (command[0] == 'P' && command[1] == ',') {
@@ -98,21 +99,12 @@ void handle_uart_command(char* command) {
 }
 
 void capture_and_process_signal() {
+    // --- 1. Record Phase ---
     cc1101_strobe(CC1101_SRX);
     memset(sample_buffer, 0, SAMPLE_BUFFER_SIZE);
+    printf("Starting raw recording...\n");
 
-    // Wait for the first rising edge to start recording (with timeout)
-    uint32_t start_time = time_us_32();
-    while(!gpio_get(CC1101_PIN_GDO0)) {
-        if (time_us_32() - start_time > 2000000) {
-            uart_puts(UART_ID, "ERR: Capture timed out waiting for signal.\n");
-            cc1101_strobe(CC1101_SIDLE);
-            return;
-        }
-    }
-    printf("Signal trigger detected.\n");
-
-    // --- High-speed sampling loop ---
+    // Blindly record for the duration of the buffer
     for (int i = 0; i < SAMPLE_BUFFER_SIZE; i++) {
         uint8_t byte = 0;
         for (int j = 0; j < 8; j++) {
@@ -123,37 +115,60 @@ void capture_and_process_signal() {
     }
 
     cc1101_strobe(CC1101_SIDLE);
-    printf("Sampling complete. Processing...\n");
+    printf("Recording complete. Analyzing %d samples...\n", TOTAL_SAMPLES);
 
-    // --- On-device processing: samples to pulse widths ---
+    // --- 2. Analyze Phase ---
     uint16_t pulse_count = 0;
-    bool last_state = (sample_buffer[0] >> 7) & 1;
+    int start_index = -1;
+    bool idle_state_is_low = true; // Assume idle is low, can be improved later
+
+    // Find first long period of idle to filter out initial noise
+    int consecutive_idle_samples = 0;
+    int first_signal_edge = -1;
+    bool last_sample_state = (sample_buffer[0] >> 7) & 1;
+
+    for (int i = 0; i < TOTAL_SAMPLES; i++) {
+        bool current_sample_state = (sample_buffer[i / 8] >> (7 - (i % 8))) & 1;
+        if (current_sample_state == !idle_state_is_low) { // Found potential signal
+            if (consecutive_idle_samples > 5000 / SAMPLE_RATE_US) { // Found >5ms of silence
+                first_signal_edge = i;
+                break;
+            }
+        } else {
+            consecutive_idle_samples++;
+        }
+    }
+
+    if (first_signal_edge == -1) {
+        uart_puts(UART_ID, "ERR: No signal found in recording.\n");
+        return;
+    }
+
+    printf("Signal start detected at sample %d. Processing pulses.\n", first_signal_edge);
+
+    // --- 3. Process Phase (Run-length encoding) ---
+    bool current_run_state = (sample_buffer[first_signal_edge / 8] >> (7 - (first_signal_edge % 8))) & 1;
     uint32_t current_pulse_length = 0;
 
-    for (int i = 0; i < SAMPLE_BUFFER_SIZE; i++) {
-        for (int j = 7; j >= 0; j--) {
-            bool current_state = (sample_buffer[i] >> j) & 1;
-            if (current_state != last_state) {
-                if (pulse_count < PULSE_BUFFER_SIZE) {
-                    pulse_buffer[pulse_count++] = current_pulse_length * SAMPLE_RATE_US;
-                } else {
-                    goto end_processing; // Buffer full
-                }
-                current_pulse_length = 0;
-                last_state = current_state;
+    for (int i = first_signal_edge; i < TOTAL_SAMPLES; i++) {
+        bool sample = (sample_buffer[i / 8] >> (7 - (i % 8))) & 1;
+        if (sample != current_run_state) {
+            if (pulse_count < PULSE_BUFFER_SIZE) {
+                pulse_buffer[pulse_count++] = current_pulse_length * SAMPLE_RATE_US;
+            } else {
+                break; // Pulse buffer full
             }
-            current_pulse_length++;
+            current_pulse_length = 0;
+            current_run_state = sample;
         }
+        current_pulse_length++;
     }
     // Add the last pulse
     if (pulse_count < PULSE_BUFFER_SIZE) {
         pulse_buffer[pulse_count++] = current_pulse_length * SAMPLE_RATE_US;
     }
 
-end_processing:
-    printf("Processing complete. Found %d pulses.\n", pulse_count);
-
-    // Send captured pulse data to PC
+    // --- 4. Report Phase ---
     if (pulse_count > 0) {
         char temp_buf[20];
         uart_puts(UART_ID, "PULSE:");
@@ -163,9 +178,8 @@ end_processing:
         }
         uart_puts(UART_ID, "\n");
     } else {
-        uart_puts(UART_ID, "ERR: No pulses captured after trigger.\n");
+        uart_puts(UART_ID, "ERR: No pulses found after signal start.\n");
     }
-    uart_puts(UART_ID, "OK: Capture Finished\n");
 }
 
 void transmit_pulses(char* data) {
