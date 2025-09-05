@@ -26,12 +26,13 @@ endif()
 set(PICO_BOARD pico_w CACHE STRING "Board type")
 
 # Pull in Raspberry Pi Pico SDK (must be before project)
+set(PICO_SDK_FETCH_FROM_GIT ON)
 include(pico_sdk_import.cmake)
 
 project(RP C CXX ASM)
 
 # --- Add build-time option for output mode ---
-set(OUTPUT_MODE "GENERIC" CACHE STRING "Gamepad output mode (GENERIC, SWITCH, DS4)")
+set(OUTPUT_MODE "SWITCH" CACHE STRING "Gamepad output mode (GENERIC, SWITCH, DS4)")
 set_property(CACHE OUTPUT_MODE PROPERTY STRINGS "GENERIC" "SWITCH" "DS4")
 message(STATUS "Gamepad Output Mode set to: ${OUTPUT_MODE}")
 

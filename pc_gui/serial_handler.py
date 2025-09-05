@@ -104,3 +104,40 @@ class SerialHandler:
         if not self.ser or not self.ser.is_open: return
         packet = self._create_packet_v2(state)
         self.ser.write(packet)
+
+    def _create_packet_v3(self, state):
+        header = 0xA7
+
+        # Extract data from state, providing defaults
+        buttons = state.get('buttons', 0)
+        dpad = state.get('dpad', 0)
+        lx = max(-128, min(127, state.get('lx', 0)))
+        ly = max(-128, min(127, state.get('ly', 0)))
+        rx = max(-128, min(127, state.get('rx', 0)))
+        ry = max(-128, min(127, state.get('ry', 0)))
+        l2 = max(0, min(255, state.get('l2', 0)))
+        r2 = max(0, min(255, state.get('r2', 0)))
+        accel_x = state.get('accel_x', 0)
+        accel_y = state.get('accel_y', 0)
+        accel_z = state.get('accel_z', 0)
+        gyro_x = state.get('gyro_x', 0)
+        gyro_y = state.get('gyro_y', 0)
+        gyro_z = state.get('gyro_z', 0)
+
+        # Payload format: <H 4b 2B B 6h
+        payload = struct.pack('<H4b2BB6h',
+            buttons, lx, ly, rx, ry, l2, r2, dpad,
+            accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z
+        )
+
+        # Calculate checksum over header and payload
+        checksum = header
+        for byte in payload:
+            checksum ^= byte
+
+        return bytearray([header]) + payload + bytearray([checksum])
+
+    def send_gamepad_state_v3(self, state):
+        if not self.ser or not self.ser.is_open: return
+        packet = self._create_packet_v3(state)
+        self.ser.write(packet)
