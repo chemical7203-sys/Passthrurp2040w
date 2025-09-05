@@ -11,6 +11,7 @@
 #if CFG_TUD_HID_SONY
 #include "ds4_report.h"
 #include "ps4_auth.h"
+#include "crc32.h"
 #elif CFG_TUD_HID_NINTENDO
 #include "switch_report.h"
 #endif
@@ -76,20 +77,6 @@ void process_uart() {
     }
 }
 
-// TODO: Replace with a proper CRC32 implementation from a library
-uint32_t CRC32_calculate(const uint8_t* data, uint32_t size) {
-    uint32_t crc = 0xFFFFFFFF;
-    for (uint32_t i = 0; i < size; i++) {
-        uint8_t ch = data[i];
-        for (uint32_t j = 0; j < 8; j++) {
-            uint32_t b = (ch ^ crc) & 1;
-            crc >>= 1;
-            if (b) crc = crc ^ 0xEDB88320;
-            ch >>= 1;
-        }
-    }
-    return ~crc;
-}
 
 
 #if CFG_TUD_HID_SONY
@@ -198,7 +185,16 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
 
   // The host is sending us a nonce to sign
   if (report_id == 0xF0) { // PS4_SET_AUTH_PAYLOAD
-    // TODO: Implement CRC32 check on the buffer as in GP2040-CE
+    // Reconstruct the buffer for CRC check
+    uint8_t crc_buffer[64];
+    crc_buffer[0] = report_id;
+    memcpy(&crc_buffer[1], buffer, bufsize);
+    uint32_t received_crc = *(uint32_t*)(&crc_buffer[bufsize - 3]);
+
+    if (CRC32_calculate(crc_buffer, bufsize - 3) != received_crc) {
+        // CRC check failed, ignore the packet
+        return;
+    }
 
     // The nonce is received in chunks.
     // buffer[0] is nonce_id, buffer[1] is nonce_page

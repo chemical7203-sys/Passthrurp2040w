@@ -43,6 +43,7 @@ add_executable(RP
         RP.c
         usb_descriptors.c
         ps4_auth.c
+        crc32.c
         )
 
 # Add compile definitions based on the selected output mode
