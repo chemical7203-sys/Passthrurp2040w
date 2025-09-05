@@ -18,7 +18,7 @@
 volatile bool capture_mode = false;
 volatile bool rssi_mode = false;
 volatile bool scan_mode = false;
-char uart_rx_buffer[2048]; // Increased for long pulse trains
+char uart_rx_buffer[2048];
 uint16_t uart_rx_index = 0;
 uint32_t pulse_buffer[PULSE_BUFFER_SIZE];
 uint16_t pulse_count = 0;
@@ -93,19 +93,19 @@ int main()
 void handle_uart_command(char* command) {
     printf("Handling command: %s\n", command);
     switch(command[0]) {
-        case 'C': // Capture
+        case 'C':
             if (!capture_mode && !rssi_mode && !scan_mode) {
                 uart_puts(UART_ID, "OK: Capturing raw pulses... Press remote.\n");
                 capture_mode = true;
             }
             break;
-        case 'S': // RSSI Scan
+        case 'S':
              if (!capture_mode && !rssi_mode && !scan_mode) {
                 uart_puts(UART_ID, "OK: RSSI Mode ON\n");
                 rssi_mode = true;
             }
             break;
-        case 'F': // Frequency Scan
+        case 'F':
             if (!capture_mode && !rssi_mode && !scan_mode) {
                 if (command[1] == ',') {
                     scan_frequencies(command + 2);
@@ -114,7 +114,7 @@ void handle_uart_command(char* command) {
                 }
             }
             break;
-        case 'P': // Pulse Transmit
+        case 'P':
             if (!capture_mode && !rssi_mode && !scan_mode) {
                 if (command[1] == ',') {
                     transmit_pulses(command + 2);
@@ -123,7 +123,7 @@ void handle_uart_command(char* command) {
                 }
             }
             break;
-        case 'E': // Exit continuous modes
+        case 'E':
             if (rssi_mode || scan_mode) {
                 uart_puts(UART_ID, "OK: Mode OFF\n");
                 cc1101_strobe(CC1101_SIDLE);
@@ -131,7 +131,7 @@ void handle_uart_command(char* command) {
                 scan_mode = false;
             }
             break;
-        case 'D': // Dump Registers
+        case 'D':
             dump_registers();
             break;
         default:
@@ -141,37 +141,39 @@ void handle_uart_command(char* command) {
 }
 
 void transmit_pulses(char* data) {
+    printf("[TX_DEBUG] Entered transmit_pulses function.\n");
     uart_puts(UART_ID, "OK: Transmitting pulses...\n");
 
-    // Configure GDO0 as output for TX data
     gpio_init(CC1101_PIN_GDO0);
     gpio_set_dir(CC1101_PIN_GDO0, GPIO_OUT);
+    printf("[TX_DEBUG] GDO0 configured as output.\n");
 
-    // Put radio in TX mode
     cc1101_strobe(CC1101_STX);
+    printf("[TX_DEBUG] Radio in TX mode.\n");
 
-    // The first pulse duration determines the initial state.
-    // We assume the signal starts with a HIGH pulse (idle is LOW).
     bool state = true;
 
+    printf("[TX_DEBUG] Parsing and transmitting loop starting...\n");
     char* token = strtok(data, ",");
+    int pulse_num = 0;
     while(token != NULL) {
         uint32_t duration = atoi(token);
         if (duration > 0) {
+            // printf("[TX_DEBUG] Pulse %d: %lu us\n", pulse_num++, duration);
             gpio_put(CC1101_PIN_GDO0, state);
             busy_wait_us_32(duration);
-            state = !state; // Toggle for next pulse
+            state = !state;
         }
         token = strtok(NULL, ",");
     }
+    printf("[TX_DEBUG] Loop finished.\n");
 
-    // Ensure pin is low at the end
     gpio_put(CC1101_PIN_GDO0, 0);
 
-    // Return radio to IDLE and re-configure GDO0 for input
     cc1101_strobe(CC1101_SIDLE);
     gpio_init(CC1101_PIN_GDO0);
     gpio_set_dir(CC1101_PIN_GDO0, GPIO_IN);
+    printf("[TX_DEBUG] GDO0 reconfigured as input. TX complete.\n");
 
     uart_puts(UART_ID, "OK: Transmission finished.\n");
 }
@@ -209,7 +211,6 @@ void scan_frequencies(char* data) {
         uart_puts(UART_ID, scan_msg);
     }
     cc1101_strobe(CC1101_SIDLE);
-    // Restore default frequency
     cc1101_configure();
     uart_puts(UART_ID, "OK: Frequency scan finished.\n");
     scan_mode = false;
@@ -217,12 +218,9 @@ void scan_frequencies(char* data) {
 
 void capture_pulses() {
     pulse_count = 0;
-
-    // Flush buffer and enter RX
     cc1101_strobe(CC1101_SIDLE);
     cc1101_strobe(CC1101_SFRX);
     cc1101_strobe(CC1101_SRX);
-
     uint32_t start_time = time_us_32();
     while(!gpio_get(CC1101_PIN_GDO0)) {
         if (time_us_32() - start_time > 2000000) {
