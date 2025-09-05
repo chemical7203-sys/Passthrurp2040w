@@ -13,7 +13,7 @@
 #define UART_RX_PIN 5
 
 // --- Global State ---
-#define PULSE_BUFFER_SIZE 512
+#define PULSE_BUFFER_SIZE 1024 // Increased buffer size for longer signals
 volatile bool capture_mode = false;
 volatile bool rssi_mode = false;
 char uart_rx_buffer[128];
@@ -125,14 +125,12 @@ void handle_uart_command(char* command) {
 void capture_pulses() {
     pulse_count = 0;
 
-    // Put radio in RX mode
     cc1101_strobe(CC1101_SRX);
 
     // Wait for the first edge (transition from idle low to high)
-    // Timeout after 2 seconds if no signal
     uint32_t start_time = time_us_32();
     while(!gpio_get(CC1101_PIN_GDO0)) {
-        if (time_us_32() - start_time > 2000000) {
+        if (time_us_32() - start_time > 2000000) { // 2 second timeout
             uart_puts(UART_ID, "ERR: Capture timed out waiting for signal.\n");
             cc1101_strobe(CC1101_SIDLE);
             return;
@@ -143,8 +141,7 @@ void capture_pulses() {
     bool current_state = gpio_get(CC1101_PIN_GDO0);
     uint32_t last_edge_time = time_us_32();
 
-    // Capture for a max of 3 seconds or until buffer is full
-    while(pulse_count < PULSE_BUFFER_SIZE && (time_us_32() - start_time < 5000000)) {
+    while(pulse_count < PULSE_BUFFER_SIZE && (time_us_32() - start_time < 5000000)) { // 5 sec total capture
         bool new_state = gpio_get(CC1101_PIN_GDO0);
         if (new_state != current_state) {
             uint32_t now = time_us_32();
@@ -153,8 +150,8 @@ void capture_pulses() {
             last_edge_time = now;
             current_state = new_state;
         }
-        // Timeout between edges (end of transmission)
-        if (time_us_32() - last_edge_time > 100000) { // 100ms
+        // Increased timeout between edges to allow for gaps between transmissions
+        if (time_us_32() - last_edge_time > 300000) { // 300ms
             break;
         }
     }
