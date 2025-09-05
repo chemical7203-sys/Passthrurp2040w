@@ -12,6 +12,7 @@
 #include "ds4_report.h"
 #elif CFG_TUD_HID_NINTENDO
 #include "switch_report.h"
+#include "switch_spi_flash.h"
 #endif
 
 // Struct to hold the received v2 controller data from UART
@@ -32,6 +33,27 @@ static uint8_t report_counter = 0;
 // State for Switch Pro Controller handshake
 static bool switch_is_ready = false;
 static bool switch_is_initialized = false;
+
+// Function to read from emulated SPI flash, adapted from GP2040-CE
+void read_spi_flash(uint32_t address, uint8_t* buffer, uint16_t size) {
+    if (address >= 0x6000 && address < 0x7000) {
+        uint16_t offset = address - 0x6000;
+        if (offset + size <= sizeof(factory_config_data)) {
+            memcpy(buffer, &factory_config_data[offset], size);
+        } else {
+            memset(buffer, 0xFF, size); // Out of bounds
+        }
+    } else if (address >= 0x8000 && address < 0x9000) {
+        uint16_t offset = address - 0x8000;
+        if (offset + size <= sizeof(user_calibration_data)) {
+            memcpy(buffer, &user_calibration_data[offset], size);
+        } else {
+            memset(buffer, 0xFF, size); // Out of bounds
+        }
+    } else {
+        memset(buffer, 0xFF, size); // Address not implemented
+    }
+}
 #endif
 
 #define UART_ID uart1
@@ -109,6 +131,13 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
             subcommand_ack = 0x82; // Specific ACK for device info
             reply[15] = 0x03; // Controller type (Pro Controller)
             reply[16] = 0x48; // Colors
+        } else if (subcommand_cmd == 0x10) { // SPI Flash Read
+            uint32_t address = buffer[11] | (buffer[12] << 8) | (buffer[13] << 16) | (buffer[14] << 24);
+            uint8_t size = buffer[15];
+
+            subcommand_ack = 0x90; // ACK for SPI read
+            memcpy(&reply[15], &buffer[11], 5); // Copy address and size back into reply
+            read_spi_flash(address, &reply[20], size); // Read from flash and copy into reply
         }
 
         reply[13] = subcommand_ack;
