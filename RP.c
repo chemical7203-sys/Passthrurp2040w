@@ -161,6 +161,8 @@ void scan_frequencies(char* data) {
             break;
         }
 
+        // Go to IDLE first to ensure a proper recalibration for the new frequency
+        cc1101_strobe(CC1101_SIDLE);
         cc1101_set_frequency(current_khz);
         cc1101_strobe(CC1101_SRX);
         sleep_ms(20); // Let receiver settle
