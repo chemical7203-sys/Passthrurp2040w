@@ -8,7 +8,7 @@ import time
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("RP2040 CC1101 Signal Recorder")
+        self.title("RP2040 CC1101 Signal Cloner")
         self.geometry("700x500")
 
         self.serial_port = None
@@ -35,17 +35,23 @@ class App(tk.Tk):
         self.disconnect_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         # Frame for controls
-        control_frame = ttk.LabelFrame(self, text="Capture")
-        control_frame.pack(padx=10, pady=5, fill="x")
+        control_frame = ttk.LabelFrame(self, text="Capture & Clone")
+        control_frame.pack(padx=10, pady=5, fill="x", expand=False)
 
-        self.start_capture_button = ttk.Button(control_frame, text="Start Digital Sample Capture", command=lambda: self.send_command("C"), state=tk.DISABLED)
+        self.start_capture_button = ttk.Button(control_frame, text="Start Capture", command=lambda: self.send_command("C"), state=tk.DISABLED)
         self.start_capture_button.pack(side=tk.LEFT, padx=5, pady=5)
 
+        self.tx_entry = ttk.Entry(control_frame)
+        self.tx_entry.pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill="x")
+
+        self.transmit_button = ttk.Button(control_frame, text="Transmit Captured Signal", command=self.transmit_data, state=tk.DISABLED)
+        self.transmit_button.pack(side=tk.LEFT, padx=5, pady=5)
+
         # Log area
-        log_frame = ttk.LabelFrame(self, text="Log & Waveform")
+        log_frame = ttk.LabelFrame(self, text="Log")
         log_frame.pack(padx=10, pady=10, expand=True, fill="both")
 
-        self.log_area = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, state=tk.DISABLED, font=("Courier New", 8))
+        self.log_area = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, state=tk.DISABLED, font=("Courier New", 9))
         self.log_area.pack(expand=True, fill="both")
 
     def log(self, message, end="\n"):
@@ -63,6 +69,7 @@ class App(tk.Tk):
             self.serial_port = serial.Serial(port, 115200, timeout=1)
             self.log(f"Connected to {port}.")
             self.start_capture_button.config(state=tk.NORMAL)
+            self.transmit_button.config(state=tk.NORMAL)
             self.connect_button.config(state=tk.DISABLED)
             self.disconnect_button.config(state=tk.NORMAL)
             self.running = True
@@ -80,6 +87,7 @@ class App(tk.Tk):
             self.serial_port.close()
             self.log("Disconnected.")
         self.start_capture_button.config(state=tk.DISABLED)
+        self.transmit_button.config(state=tk.DISABLED)
         self.connect_button.config(state=tk.NORMAL)
         self.disconnect_button.config(state=tk.DISABLED)
 
@@ -91,7 +99,6 @@ class App(tk.Tk):
                     data = self.serial_port.read(self.serial_port.in_waiting).decode('utf-8', errors='ignore')
                     buffer += data
 
-                    # Process complete lines
                     while '\n' in buffer:
                         line, buffer = buffer.split('\n', 1)
                         self.process_line(line.strip())
@@ -102,33 +109,21 @@ class App(tk.Tk):
             except Exception as e:
                 self.log(f"An error occurred: {e}")
             time.sleep(0.05)
-        self.disconnect_serial()
+
+        # Ensure UI is disabled after thread stops
+        if not self.running:
+            self.disconnect_serial()
 
     def process_line(self, line):
         if not line:
             return
 
         self.log(f"Pico: {line}")
-        if line.startswith("SAMPLES:"):
-            hex_data = line.replace("SAMPLES:", "")
-            self.log(f"Received {len(hex_data) // 2} bytes of sample data. Visualizing waveform...")
-            self.visualize_samples(hex_data)
-
-    def visualize_samples(self, hex_data):
-        try:
-            binary_data = bin(int(hex_data, 16))[2:].zfill(len(hex_data) * 4)
-            waveform = ""
-            for bit in binary_data:
-                waveform += "¯" if bit == '1' else "_"
-
-            # Print in chunks
-            chunk_size = 120
-            for i in range(0, len(waveform), chunk_size):
-                self.log(waveform[i:i+chunk_size], end="")
-            self.log("\n--- End of Waveform ---")
-
-        except Exception as e:
-            self.log(f"Error visualizing waveform: {e}")
+        if line.startswith("PULSE:"):
+            pulse_data = line.replace("PULSE:", "").strip()
+            self.tx_entry.delete(0, tk.END)
+            self.tx_entry.insert(0, pulse_data)
+            self.log("-> Copied pulse data to transmit box.")
 
     def send_command(self, command):
         if self.serial_port and self.serial_port.is_open:
@@ -138,8 +133,22 @@ class App(tk.Tk):
         else:
             self.log("Not connected.")
 
+    def transmit_data(self):
+        data = self.tx_entry.get().strip()
+        if not data:
+            self.log("Error: Transmit data is empty.")
+            return
+
+        if not all(c in '0123456789,' for c in data):
+            self.log("Error: Invalid characters in pulse data. Should be numbers and commas.")
+            return
+
+        self.send_command(f"P,{data}")
+
     def on_closing(self):
-        self.disconnect_serial()
+        self.running = False
+        if self.serial_port:
+            self.serial_port.close()
         self.destroy()
 
 if __name__ == "__main__":
