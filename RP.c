@@ -14,36 +14,17 @@
 #define UART_RX_PIN 5
 
 // --- Global State ---
-#define PULSE_BUFFER_SIZE 1024
+#define SAMPLE_BUFFER_SIZE 32768 // 32KB buffer for samples
 volatile bool capture_mode = false;
-volatile bool rssi_mode = false;
-volatile bool scan_mode = false;
-char uart_rx_buffer[8192];
+char uart_rx_buffer[128]; // Command buffer is small
 uint16_t uart_rx_index = 0;
-uint32_t pulse_buffer[PULSE_BUFFER_SIZE];
-uint16_t pulse_count = 0;
+uint8_t sample_buffer[SAMPLE_BUFFER_SIZE];
 
 
 // --- Function Prototypes ---
 void setup_uart();
 void handle_uart_command(char* command);
-void dump_registers();
-void capture_pulses();
-void transmit_pulses(char* data);
-void scan_frequencies(char* data);
-int16_t convert_rssi(uint8_t rssi_dec);
-
-// A safer way to get the next token from a comma-separated string
-char* safe_strtok(char** str, const char* delim) {
-    if (*str == NULL) return NULL;
-    char* token_start = *str;
-    *str = strpbrk(token_start, delim);
-    if (*str) {
-        **str = '\0';
-        (*str)++;
-    }
-    return token_start;
-}
+void capture_samples();
 
 void setup_uart() {
     uart_init(UART_ID, BAUD_RATE);
@@ -55,11 +36,13 @@ void setup_uart() {
 int main()
 {
     stdio_init_all();
+    // Set system clock to max for faster sampling
+    // set_sys_clock_khz(250000, true);
     printf("RP2040 Booting...\n");
     setup_uart();
     cc1101_init();
     cc1101_configure();
-    printf("CC1101 Initialized.\n");
+    printf("CC1101 Initialized for Raw Sampling Mode.\n");
     uart_puts(UART_ID, "CC1101 Ready.\n");
 
     while (true) {
@@ -77,219 +60,68 @@ int main()
         }
 
         if (capture_mode) {
-            capture_pulses();
-            capture_mode = false;
-            uart_puts(UART_ID, "OK: Capture Finished\n");
-            printf("Capture finished.\n");
-        } else if (rssi_mode) {
-            cc1101_strobe(CC1101_SIDLE);
-            sleep_us(500);
-            cc1101_strobe(CC1101_SRX);
-            sleep_us(500);
-            uint8_t rssi_raw = cc1101_read_status_reg(CC1101_RSSI);
-            int16_t rssi_dbm = convert_rssi(rssi_raw);
-            char rssi_msg[32];
-            sprintf(rssi_msg, "RSSI_DBM:%d\n", rssi_dbm);
-            uart_puts(UART_ID, rssi_msg);
-            sleep_ms(100);
-        } else if (scan_mode) {
-            sleep_ms(100);
+            capture_samples();
+            capture_mode = false; // Auto-stop after capture
+            uart_puts(UART_ID, "OK: Sampling Finished\n");
+            printf("Sampling finished.\n");
         }
-        else {
-            sleep_ms(10);
-        }
+
+        sleep_ms(10); // Yield for a moment
     }
     return 0;
 }
 
 void handle_uart_command(char* command) {
     printf("Handling command: %s\n", command);
-    switch(command[0]) {
-        case 'C':
-            if (!capture_mode && !rssi_mode && !scan_mode) {
-                uart_puts(UART_ID, "OK: Capturing raw pulses... Press remote.\n");
-                capture_mode = true;
-            }
-            break;
-        case 'S':
-             if (!capture_mode && !rssi_mode && !scan_mode) {
-                uart_puts(UART_ID, "OK: RSSI Mode ON\n");
-                rssi_mode = true;
-            }
-            break;
-        case 'F':
-            if (!capture_mode && !rssi_mode && !scan_mode) {
-                if (command[1] == ',') {
-                    scan_frequencies(command + 2);
-                } else {
-                    uart_puts(UART_ID, "ERR: Invalid freq scan format.\n");
-                }
-            }
-            break;
-        case 'P':
-            if (!capture_mode && !rssi_mode && !scan_mode) {
-                if (command[1] == ',') {
-                    transmit_pulses(command + 2);
-                } else {
-                    uart_puts(UART_ID, "ERR: Invalid pulse transmit format.\n");
-                }
-            }
-            break;
-        case 'E':
-            if (rssi_mode || scan_mode) {
-                uart_puts(UART_ID, "OK: Mode OFF\n");
-                cc1101_strobe(CC1101_SIDLE);
-                rssi_mode = false;
-                scan_mode = false;
-            }
-            break;
-        case 'D':
-            dump_registers();
-            break;
-        default:
-            uart_puts(UART_ID, "ERR: Unknown command\n");
-            break;
-    }
-}
-
-void transmit_pulses(char* data) {
-    uart_puts(UART_ID, "OK: Transmitting pulses...\n");
-
-    gpio_init(CC1101_PIN_GDO0);
-    gpio_set_dir(CC1101_PIN_GDO0, GPIO_OUT);
-
-    cc1101_strobe(CC1101_STX);
-
-    bool state = true;
-
-    char* p = data;
-    char* token;
-    int pulse_num = 0;
-    while((token = safe_strtok(&p, ",")) != NULL) {
-        if (*token == '\0') continue;
-        uint32_t duration = atoi(token);
-        if (duration > 0) {
-            gpio_put(CC1101_PIN_GDO0, state);
-            busy_wait_us_32(duration);
-            state = !state;
-            pulse_num++;
-            if (pulse_num % 20 == 0) {
-                char status_msg[32];
-                sprintf(status_msg, "TX_STATUS: Sent pulse %d\n", pulse_num);
-                uart_puts(UART_ID, status_msg);
-            }
+    if (strcmp(command, "C") == 0) {
+        if (!capture_mode) {
+            uart_puts(UART_ID, "OK: Starting digital sampling... Press remote.\n");
+            capture_mode = true;
         }
+    } else {
+        uart_puts(UART_ID, "ERR: Unknown command. Only 'C' is supported in this version.\n");
     }
-
-    gpio_put(CC1101_PIN_GDO0, 0);
-
-    cc1101_strobe(CC1101_SIDLE);
-    gpio_init(CC1101_PIN_GDO0);
-    gpio_set_dir(CC1101_PIN_GDO0, GPIO_IN);
-
-    uart_puts(UART_ID, "OK: Transmission finished.\n");
 }
 
-
-void scan_frequencies(char* data) {
-    scan_mode = true;
-    uart_puts(UART_ID, "OK: Starting frequency scan. Hold remote button.\n");
-
-    char* p = data;
-    char* start_str = safe_strtok(&p, ",");
-    char* end_str = safe_strtok(&p, ",");
-    char* step_str = safe_strtok(&p, ",");
-
-    if (!start_str || !end_str || !step_str) {
-        uart_puts(UART_ID, "ERR: Missing scan parameters.\n");
-        scan_mode = false;
-        return;
-    }
-    uint32_t start_khz = atoi(start_str);
-    uint32_t end_khz = atoi(end_str);
-    uint32_t step_khz = atoi(step_str);
-    if (step_khz == 0) step_khz = 50;
-
-    for (uint32_t current_khz = start_khz; current_khz <= end_khz; current_khz += step_khz) {
-        if (uart_is_readable(UART_ID) && uart_getc(UART_ID) == 'E') {
-            handle_uart_command("E");
-            break;
-        }
-        cc1101_strobe(CC1101_SIDLE);
-        cc1101_set_frequency(current_khz);
-        cc1101_strobe(CC1101_SRX);
-        sleep_ms(20);
-        uint8_t rssi_raw = cc1101_read_status_reg(CC1101_RSSI);
-        int16_t rssi_dbm = convert_rssi(rssi_raw);
-        char scan_msg[40];
-        sprintf(scan_msg, "SCAN:%lu,%d\n", current_khz, rssi_dbm);
-        uart_puts(UART_ID, scan_msg);
-    }
-    cc1101_strobe(CC1101_SIDLE);
-    cc1101_configure();
-    uart_puts(UART_ID, "OK: Frequency scan finished.\n");
-    scan_mode = false;
-}
-
-void capture_pulses() {
-    pulse_count = 0;
-    cc1101_strobe(CC1101_SIDLE);
-    cc1101_strobe(CC1101_SFRX);
+void capture_samples() {
+    // Prepare for capture
     cc1101_strobe(CC1101_SRX);
+    memset(sample_buffer, 0, SAMPLE_BUFFER_SIZE);
+
+    // Wait for the first rising edge to start recording (with timeout)
     uint32_t start_time = time_us_32();
     while(!gpio_get(CC1101_PIN_GDO0)) {
-        if (time_us_32() - start_time > 2000000) {
-            uart_puts(UART_ID, "ERR: Capture timed out.\n");
+        if (time_us_32() - start_time > 2000000) { // 2 second timeout
+            uart_puts(UART_ID, "ERR: Capture timed out waiting for signal.\n");
             cc1101_strobe(CC1101_SIDLE);
             return;
         }
     }
-    bool current_state = gpio_get(CC1101_PIN_GDO0);
-    uint32_t last_edge_time = time_us_32();
-    while(pulse_count < PULSE_BUFFER_SIZE && (time_us_32() - start_time < 5000000)) {
-        bool new_state = gpio_get(CC1101_PIN_GDO0);
-        if (new_state != current_state) {
-            uint32_t now = time_us_32();
-            uint32_t duration = now - last_edge_time;
-            pulse_buffer[pulse_count++] = duration;
-            last_edge_time = now;
-            current_state = new_state;
+
+    // --- High-speed sampling loop ---
+    // We will sample for a fixed duration determined by the buffer size and sample rate.
+    // Sample rate is approx 1MHz (1us per sample)
+    uint32_t sample_end_time = time_us_32() + (SAMPLE_BUFFER_SIZE * 8);
+
+    for (int i = 0; i < SAMPLE_BUFFER_SIZE; i++) {
+        uint8_t byte = 0;
+        for (int j = 0; j < 8; j++) {
+            byte |= (gpio_get(CC1101_PIN_GDO0) << (7-j));
+            busy_wait_us(1); // Wait for 1 microsecond
         }
-        if (time_us_32() - last_edge_time > 300000) {
-            break;
-        }
+        sample_buffer[i] = byte;
+        // Check for early exit if signal ends
+        if (time_us_32() > sample_end_time) break;
     }
+
     cc1101_strobe(CC1101_SIDLE);
-    if (pulse_count > 0) {
-        char temp_buf[20];
-        uart_puts(UART_ID, "PULSE:");
-        for (int i = 0; i < pulse_count; i++) {
-            sprintf(temp_buf, "%lu,", pulse_buffer[i]);
-            uart_puts(UART_ID, temp_buf);
-        }
-        uart_puts(UART_ID, "\n");
-    } else {
-        uart_puts(UART_ID, "ERR: No pulses captured.\n");
-    }
-}
 
-void dump_registers() {
-    uart_puts(UART_ID, "--- CC1101 Registers ---\n");
-    char line[40];
-    for (uint8_t i = 0x00; i <= 0x2E; i++) {
-        uint8_t value = cc1101_read_reg(i);
-        sprintf(line, "Reg 0x%02X: 0x%02X\n", i, value);
-        uart_puts(UART_ID, line);
+    // Send the captured buffer to PC as a hex string
+    uart_puts(UART_ID, "SAMPLES:");
+    char hex_byte[3];
+    for (int i = 0; i < SAMPLE_BUFFER_SIZE; i++) {
+        sprintf(hex_byte, "%02X", sample_buffer[i]);
+        uart_puts(UART_ID, hex_byte);
     }
-    uart_puts(UART_ID, "------------------------\n");
-}
-
-int16_t convert_rssi(uint8_t rssi_raw) {
-    int16_t rssi_dbm;
-    if (rssi_raw >= 128) {
-        rssi_dbm = (int16_t)((int16_t)(rssi_raw - 256) / 2) - 74;
-    } else {
-        rssi_dbm = (rssi_raw / 2) - 74;
-    }
-    return rssi_dbm;
+    uart_puts(UART_ID, "\n");
 }
