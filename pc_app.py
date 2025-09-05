@@ -9,7 +9,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("RP2040 CC1101 Signal Cloner")
-        self.geometry("600x600") # Increased height for new frame
+        self.geometry("600x650") # Increased height for new frames
 
         self.serial_port = None
         self.thread = None
@@ -36,7 +36,7 @@ class App(tk.Tk):
         self.disconnect_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         # Frame for controls
-        control_frame = ttk.LabelFrame(self, text="Controls & Debug")
+        control_frame = ttk.LabelFrame(self, text="Capture & Debug")
         control_frame.pack(padx=10, pady=5, fill="x")
 
         self.start_capture_button = ttk.Button(control_frame, text="Start Capture", command=lambda: self.send_command("C"), state=tk.DISABLED)
@@ -45,7 +45,7 @@ class App(tk.Tk):
         self.start_rssi_button = ttk.Button(control_frame, text="Start RSSI Scan", command=lambda: self.send_command("S"), state=tk.DISABLED)
         self.start_rssi_button.pack(side=tk.LEFT, padx=5, pady=5)
 
-        self.stop_button = ttk.Button(control_frame, text="Stop", command=lambda: self.send_command("E"), state=tk.DISABLED)
+        self.stop_button = ttk.Button(control_frame, text="Stop (RSSI/Scan)", command=lambda: self.send_command("E"), state=tk.DISABLED)
         self.stop_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         self.dump_regs_button = ttk.Button(control_frame, text="Dump Registers", command=lambda: self.send_command("D"), state=tk.DISABLED)
@@ -75,6 +75,19 @@ class App(tk.Tk):
 
         scan_frame.columnconfigure(1, weight=1)
         scan_frame.columnconfigure(3, weight=1)
+
+        # Frame for transmission
+        tx_frame = ttk.LabelFrame(self, text="Transmit Pulses")
+        tx_frame.pack(padx=10, pady=5, fill="x")
+
+        self.tx_label = ttk.Label(tx_frame, text="Pulse Timings (µs):")
+        self.tx_label.pack(side=tk.LEFT, padx=5, pady=5)
+
+        self.tx_entry = ttk.Entry(tx_frame)
+        self.tx_entry.pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill="x")
+
+        self.transmit_button = ttk.Button(tx_frame, text="Transmit", command=self.transmit_data, state=tk.DISABLED)
+        self.transmit_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         # Log area
         log_frame = ttk.LabelFrame(self, text="Log")
@@ -124,6 +137,7 @@ class App(tk.Tk):
         self.stop_button.config(state=state)
         self.dump_regs_button.config(state=state)
         self.start_scan_button.config(state=state)
+        self.transmit_button.config(state=state)
 
     def read_serial(self):
         while self.running:
@@ -134,14 +148,19 @@ class App(tk.Tk):
                         if "OK: Frequency scan finished" in line:
                             self.scanning = False
                             self.set_control_state(tk.NORMAL)
+                        # Auto-copy captured pulses to transmit box
+                        if line.startswith("Pico: PULSE:"):
+                            pulse_data = line.replace("Pico: PULSE:", "").strip()
+                            self.tx_entry.delete(0, tk.END)
+                            self.tx_entry.insert(0, pulse_data)
                         self.log(f"Pico: {line}")
             except (serial.SerialException, TypeError):
                 self.log("Error reading from serial port.")
-                self.disconnect_serial()
                 break
             except Exception as e:
                 self.log(f"An error occurred: {e}")
             time.sleep(0.01)
+        self.disconnect_serial()
 
     def send_command(self, command):
         if self.serial_port and self.serial_port.is_open:
@@ -160,11 +179,24 @@ class App(tk.Tk):
                 self.log("Error: Invalid frequency range or step.")
                 return
             self.scanning = True
-            self.set_control_state(tk.DISABLED) # Disable other controls
-            self.stop_button.config(state=tk.NORMAL) # Keep stop button active
+            self.set_control_state(tk.DISABLED)
+            self.stop_button.config(state=tk.NORMAL)
             self.send_command(f"F,{start},{end},{step}")
         except ValueError:
             self.log("Error: Frequency values must be integers.")
+
+    def transmit_data(self):
+        data = self.tx_entry.get().strip()
+        if not data:
+            self.log("Error: Transmit data is empty.")
+            return
+
+        # Basic validation for pulse data
+        if not all(c in '0123456789,' for c in data):
+            self.log("Error: Invalid characters in pulse data. Should be numbers and commas.")
+            return
+
+        self.send_command(f"P,{data}")
 
     def on_closing(self):
         self.disconnect_serial()

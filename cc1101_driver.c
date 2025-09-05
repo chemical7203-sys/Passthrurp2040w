@@ -106,10 +106,10 @@ void cc1101_reset() {
 void cc1101_configure() {
     cc1101_reset();
 
-    // Set frequency to 433.92 MHz
+    // Set frequency to 434.31 MHz (434310 KHz), found via scanner
     cc1101_write_reg(CC1101_FREQ2, 0x10);
-    cc1101_write_reg(CC1101_FREQ1, 0xB0);
-    cc1101_write_reg(CC1101_FREQ0, 0x71);
+    cc1101_write_reg(CC1101_FREQ1, 0xCF);
+    cc1101_write_reg(CC1101_FREQ0, 0x1A);
 
     // Modem configuration for OOK/ASK
     // Set widest possible RX filter bandwidth to catch signals that might be off-frequency
