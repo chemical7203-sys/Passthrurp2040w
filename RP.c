@@ -31,6 +31,7 @@ static uint8_t report_counter = 0;
 #if CFG_TUD_HID_NINTENDO
 // State for Switch Pro Controller handshake
 static bool switch_is_ready = false;
+static bool switch_is_initialized = false;
 #endif
 
 #define UART_ID uart1
@@ -87,48 +88,32 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
     uint8_t reply[64] = {0};
     const uint8_t report_id_output = buffer[0];
 
-    // Handle subcommand
-    if (report_id_output == 0x01 || report_id_output == 0x10 || report_id_output == 0x11) {
-        uint8_t subcommand_id = (report_id_output == 0x01) ? buffer[10] : buffer[1];
-
-        reply[0] = 0x21; // Reply report ID
-        reply[1] = report_counter; // Timer
-        // Bytes 2-12 are standard input report data, can be zeroed for ACK
-
-        uint8_t subcommand_ack = 0x80; // Default ACK
-
-        switch (subcommand_id) {
-            case 0x02: // Request device info
-                subcommand_ack = 0x82;
-                // Device info payload
-                reply[15] = 0x03; // Pro controller
-                reply[16] = 0x48; // Standard color
-                // Other fields like MAC can be left 0
-                break;
-
-            case 0x30: // Set player lights
-                // We can ignore this for now, just ACK
-                break;
-
-            // Add other subcommand handlers here if needed
-        }
-
-        reply[13] = subcommand_ack;
-        reply[14] = subcommand_id;
-        tud_hid_report(0, reply, sizeof(reply));
-    } else if (report_id_output == 0x80) {
+    if (report_id_output == 0x80) { // Host-sent command
         const uint8_t subcommand_id = buffer[1];
-        if (subcommand_id == 0x01) { // Handshake step 1
-            reply[0] = 0x81;
-            reply[1] = 0x01;
-            tud_hid_report(0, reply, sizeof(reply));
-        } else if (subcommand_id == 0x02) { // Handshake step 2
-            reply[0] = 0x81;
-            reply[1] = 0x02;
+        if (subcommand_id == 0x01 || subcommand_id == 0x02 || subcommand_id == 0x03) { // Handshake commands (incl. baud rate 0x03)
+            reply[0] = 0x81; // Reply ID
+            reply[1] = subcommand_id; // ACK the subcommand
             tud_hid_report(0, reply, sizeof(reply));
         } else if (subcommand_id == 0x04) { // Disable timeout, handshake complete
             switch_is_ready = true;
         }
+    } else if (report_id_output == 0x01 || report_id_output == 0x10) { // Rumble + Subcommand
+        const uint8_t subcommand_cmd = (report_id_output == 0x01) ? buffer[10] : buffer[1];
+
+        reply[0] = 0x21; // Standard reply report ID
+        reply[1] = report_counter;
+
+        uint8_t subcommand_ack = 0x80; // Default ACK
+
+        if (subcommand_cmd == 0x02) { // Request device info
+            subcommand_ack = 0x82; // Specific ACK for device info
+            reply[15] = 0x03; // Controller type (Pro Controller)
+            reply[16] = 0x48; // Colors
+        }
+
+        reply[13] = subcommand_ack;
+        reply[14] = subcommand_cmd;
+        tud_hid_report(0, reply, sizeof(reply));
     }
 }
 
@@ -161,6 +146,15 @@ void hid_task(void) {
 
   if ( tud_hid_ready() ) {
     #if CFG_TUD_HID_NINTENDO
+      if (!switch_is_initialized && tud_hid_ready()) {
+          // Send initial identification report to start handshake
+          uint8_t identify_report[64] = {0};
+          identify_report[0] = 0x81;
+          identify_report[1] = 0x01; // IDENTIFY
+          tud_hid_report(0, identify_report, sizeof(identify_report));
+          switch_is_initialized = true;
+      }
+
       if (switch_is_ready) {
         hid_nintendo_report_t report = {0};
         report.report_id = 0x30;
