@@ -79,5 +79,11 @@ void cc1101_reset();
  */
 void cc1101_configure();
 
+/**
+ * @brief Sets the carrier frequency for the CC1101.
+ * @param freq_khz The desired frequency in kilohertz (e.g., 433920 for 433.92 MHz).
+ */
+void cc1101_set_frequency(uint32_t freq_khz);
+
 
 #endif // _CC1101_DRIVER_H_

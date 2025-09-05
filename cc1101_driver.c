@@ -151,3 +151,21 @@ void cc1101_configure() {
     uint8_t partnum = cc1101_read_status_reg(CC1101_PARTNUM);
     printf("CC1101 Partnum: 0x%02X, Version: 0x%02X\n", partnum, version);
 }
+
+void cc1101_set_frequency(uint32_t freq_khz) {
+    // Formula from datasheet: F_carrier = (F_XOSC / 2^16) * FREQ
+    // Rearranged: FREQ = (F_carrier / F_XOSC) * 2^16
+    // Using integer math with F_XOSC = 26 MHz
+    // FREQ = (freq_khz * 1000 / 26,000,000) * 65536
+    uint64_t freq_reg_val = ((uint64_t)freq_khz * 1000 * 65536) / 26000000;
+
+    uint8_t freq2 = (freq_reg_val >> 16) & 0xFF;
+    uint8_t freq1 = (freq_reg_val >> 8) & 0xFF;
+    uint8_t freq0 = freq_reg_val & 0xFF;
+
+    cc1101_write_reg(CC1101_FREQ2, freq2);
+    cc1101_write_reg(CC1101_FREQ1, freq1);
+    cc1101_write_reg(CC1101_FREQ0, freq0);
+
+    printf("Set frequency to %lu KHz (Regs: %02X, %02X, %02X)\n", freq_khz, freq2, freq1, freq0);
+}

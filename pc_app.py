@@ -9,11 +9,12 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("RP2040 CC1101 Signal Cloner")
-        self.geometry("600x500")
+        self.geometry("600x600") # Increased height for new frame
 
         self.serial_port = None
         self.thread = None
         self.running = False
+        self.scanning = False
 
         # --- GUI Elements ---
 
@@ -50,19 +51,30 @@ class App(tk.Tk):
         self.dump_regs_button = ttk.Button(control_frame, text="Dump Registers", command=lambda: self.send_command("D"), state=tk.DISABLED)
         self.dump_regs_button.pack(side=tk.LEFT, padx=5, pady=5)
 
-        # Frame for transmission
-        tx_frame = ttk.LabelFrame(self, text="Transmit")
-        tx_frame.pack(padx=10, pady=5, fill="x")
+        # Frame for Frequency Scanner
+        scan_frame = ttk.LabelFrame(self, text="Frequency Scanner")
+        scan_frame.pack(padx=10, pady=5, fill="x")
 
-        self.tx_label = ttk.Label(tx_frame, text="Hex Data:")
-        self.tx_label.pack(side=tk.LEFT, padx=5, pady=5)
+        ttk.Label(scan_frame, text="Start (KHz):").grid(row=0, column=0, padx=5, pady=2, sticky="w")
+        self.start_freq_entry = ttk.Entry(scan_frame)
+        self.start_freq_entry.insert(0, "433000")
+        self.start_freq_entry.grid(row=0, column=1, padx=5, pady=2, sticky="ew")
 
-        self.tx_entry = ttk.Entry(tx_frame)
-        self.tx_entry.pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill="x")
+        ttk.Label(scan_frame, text="End (KHz):").grid(row=1, column=0, padx=5, pady=2, sticky="w")
+        self.end_freq_entry = ttk.Entry(scan_frame)
+        self.end_freq_entry.insert(0, "435000")
+        self.end_freq_entry.grid(row=1, column=1, padx=5, pady=2, sticky="ew")
 
-        self.transmit_button = ttk.Button(tx_frame, text="Transmit", command=self.transmit_data, state=tk.DISABLED)
-        self.transmit_button.pack(side=tk.LEFT, padx=5, pady=5)
+        ttk.Label(scan_frame, text="Step (KHz):").grid(row=0, column=2, padx=5, pady=2, sticky="w")
+        self.step_freq_entry = ttk.Entry(scan_frame)
+        self.step_freq_entry.insert(0, "50")
+        self.step_freq_entry.grid(row=0, column=3, padx=5, pady=2, sticky="ew")
 
+        self.start_scan_button = ttk.Button(scan_frame, text="Start Scan", command=self.start_frequency_scan, state=tk.DISABLED)
+        self.start_scan_button.grid(row=1, column=2, columnspan=2, padx=5, pady=2, sticky="ew")
+
+        scan_frame.columnconfigure(1, weight=1)
+        scan_frame.columnconfigure(3, weight=1)
 
         # Log area
         log_frame = ttk.LabelFrame(self, text="Log")
@@ -82,41 +94,36 @@ class App(tk.Tk):
         if not port:
             self.log("Error: No port selected.")
             return
-
         try:
             self.serial_port = serial.Serial(port, 115200, timeout=1)
             self.log(f"Connected to {port}.")
+            self.set_control_state(tk.NORMAL)
             self.connect_button.config(state=tk.DISABLED)
             self.disconnect_button.config(state=tk.NORMAL)
-            self.start_capture_button.config(state=tk.NORMAL)
-            self.start_rssi_button.config(state=tk.NORMAL)
-            self.stop_button.config(state=tk.NORMAL)
-            self.dump_regs_button.config(state=tk.NORMAL)
-            self.transmit_button.config(state=tk.NORMAL)
-
             self.running = True
             self.thread = threading.Thread(target=self.read_serial)
             self.thread.daemon = True
             self.thread.start()
-
         except serial.SerialException as e:
             self.log(f"Error connecting: {e}")
 
     def disconnect_serial(self):
         if self.serial_port and self.serial_port.is_open:
             self.running = False
-            self.thread.join(timeout=1)
+            if self.thread:
+                self.thread.join(timeout=1)
             self.serial_port.close()
             self.log("Disconnected.")
-
+        self.set_control_state(tk.DISABLED)
         self.connect_button.config(state=tk.NORMAL)
         self.disconnect_button.config(state=tk.DISABLED)
-        self.start_capture_button.config(state=tk.DISABLED)
-        self.start_rssi_button.config(state=tk.DISABLED)
-        self.stop_button.config(state=tk.DISABLED)
-        self.dump_regs_button.config(state=tk.DISABLED)
-        self.transmit_button.config(state=tk.DISABLED)
 
+    def set_control_state(self, state):
+        self.start_capture_button.config(state=state)
+        self.start_rssi_button.config(state=state)
+        self.stop_button.config(state=state)
+        self.dump_regs_button.config(state=state)
+        self.start_scan_button.config(state=state)
 
     def read_serial(self):
         while self.running:
@@ -124,6 +131,9 @@ class App(tk.Tk):
                 if self.serial_port and self.serial_port.in_waiting > 0:
                     line = self.serial_port.readline().decode('utf-8').strip()
                     if line:
+                        if "OK: Frequency scan finished" in line:
+                            self.scanning = False
+                            self.set_control_state(tk.NORMAL)
                         self.log(f"Pico: {line}")
             except (serial.SerialException, TypeError):
                 self.log("Error reading from serial port.")
@@ -131,7 +141,7 @@ class App(tk.Tk):
                 break
             except Exception as e:
                 self.log(f"An error occurred: {e}")
-            time.sleep(0.1)
+            time.sleep(0.01)
 
     def send_command(self, command):
         if self.serial_port and self.serial_port.is_open:
@@ -141,17 +151,20 @@ class App(tk.Tk):
         else:
             self.log("Not connected.")
 
-    def transmit_data(self):
-        data = self.tx_entry.get().strip()
-        if not data:
-            self.log("Error: Transmit data is empty.")
-            return
-
-        if not all(c in '0123456789abcdefABCDEF' for c in data):
-            self.log("Error: Invalid characters in hex data.")
-            return
-
-        self.send_command(f"T,{data}")
+    def start_frequency_scan(self):
+        try:
+            start = int(self.start_freq_entry.get())
+            end = int(self.end_freq_entry.get())
+            step = int(self.step_freq_entry.get())
+            if start >= end or step <= 0:
+                self.log("Error: Invalid frequency range or step.")
+                return
+            self.scanning = True
+            self.set_control_state(tk.DISABLED) # Disable other controls
+            self.stop_button.config(state=tk.NORMAL) # Keep stop button active
+            self.send_command(f"F,{start},{end},{step}")
+        except ValueError:
+            self.log("Error: Frequency values must be integers.")
 
     def on_closing(self):
         self.disconnect_serial()

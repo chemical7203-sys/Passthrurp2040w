@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include "pico/stdlib.h"
 #include "hardware/uart.h"
 #include "hardware/gpio.h"
@@ -13,20 +14,21 @@
 #define UART_RX_PIN 5
 
 // --- Global State ---
-#define PULSE_BUFFER_SIZE 1024 // Increased buffer size for longer signals
+#define PULSE_BUFFER_SIZE 1024
 volatile bool capture_mode = false;
 volatile bool rssi_mode = false;
-char uart_rx_buffer[128];
-uint8_t uart_rx_index = 0;
+volatile bool scan_mode = false; // New flag for frequency scan
+char uart_rx_buffer[2048];
+uint16_t uart_rx_index = 0;
 uint32_t pulse_buffer[PULSE_BUFFER_SIZE];
 uint16_t pulse_count = 0;
-
 
 // --- Function Prototypes ---
 void setup_uart();
 void handle_uart_command(char* command);
 void dump_registers();
 void capture_pulses();
+void scan_frequencies(char* data);
 int16_t convert_rssi(uint8_t rssi_dec);
 
 void setup_uart() {
@@ -40,12 +42,10 @@ int main()
 {
     stdio_init_all();
     printf("RP2040 Booting...\n");
-
     setup_uart();
     cc1101_init();
-    cc1101_configure();
-    
-    printf("CC1101 Initialized and Configured for Raw Mode.\n");
+    cc1101_configure(); // Initial configuration
+    printf("CC1101 Initialized.\n");
     uart_puts(UART_ID, "CC1101 Ready.\n");
 
     while (true) {
@@ -64,7 +64,6 @@ int main()
 
         if (capture_mode) {
             capture_pulses();
-            // After capture is done, exit capture mode automatically
             capture_mode = false;
             uart_puts(UART_ID, "OK: Capture Finished\n");
             printf("Capture finished.\n");
@@ -73,14 +72,18 @@ int main()
             sleep_us(500);
             cc1101_strobe(CC1101_SRX);
             sleep_us(500);
-
             uint8_t rssi_raw = cc1101_read_status_reg(CC1101_RSSI);
             int16_t rssi_dbm = convert_rssi(rssi_raw);
             char rssi_msg[32];
             sprintf(rssi_msg, "RSSI_DBM:%d\n", rssi_dbm);
             uart_puts(UART_ID, rssi_msg);
             sleep_ms(100);
-        } else {
+        } else if (scan_mode) {
+            // Scan logic is handled entirely in the command function
+            // This flag just prevents other modes from running
+            sleep_ms(100);
+        }
+        else {
             sleep_ms(10);
         }
     }
@@ -90,58 +93,105 @@ int main()
 void handle_uart_command(char* command) {
     printf("Handling command: %s\n", command);
     switch(command[0]) {
-        case 'C':
-            if (!capture_mode && !rssi_mode) {
+        case 'C': // Capture
+            if (!capture_mode && !rssi_mode && !scan_mode) {
                 printf("Entering Raw Pulse Capture Mode\n");
                 uart_puts(UART_ID, "OK: Capturing raw pulses... Press remote.\n");
                 capture_mode = true;
             }
             break;
-        case 'S':
-             if (!capture_mode && !rssi_mode) {
+        case 'S': // RSSI Scan
+             if (!capture_mode && !rssi_mode && !scan_mode) {
                 printf("Entering RSSI Mode\n");
                 uart_puts(UART_ID, "OK: RSSI Mode ON\n");
                 rssi_mode = true;
             }
             break;
-        case 'E':
-            if (rssi_mode) { // Only 'E' for RSSI mode now
-                printf("Exiting RSSI Mode\n");
+        case 'F': // Frequency Scan
+            if (!capture_mode && !rssi_mode && !scan_mode) {
+                if (command[1] == ',') {
+                    scan_frequencies(command + 2);
+                } else {
+                    uart_puts(UART_ID, "ERR: Invalid freq scan format.\n");
+                }
+            }
+            break;
+        case 'E': // Exit continuous modes
+            if (rssi_mode || scan_mode) {
+                printf("Exiting Continuous Mode\n");
                 uart_puts(UART_ID, "OK: Mode OFF\n");
                 cc1101_strobe(CC1101_SIDLE);
                 rssi_mode = false;
+                scan_mode = false;
             }
             break;
-        case 'D':
+        case 'D': // Dump Registers
             dump_registers();
             break;
-        // 'T' command is temporarily disabled as it needs new logic for pulse trains
         default:
-            uart_puts(UART_ID, "ERR: Unknown or disabled command\n");
+            uart_puts(UART_ID, "ERR: Unknown command\n");
             break;
     }
 }
 
+void scan_frequencies(char* data) {
+    scan_mode = true;
+    uart_puts(UART_ID, "OK: Starting frequency scan. Hold remote button.\n");
+
+    char* start_str = strtok(data, ",");
+    char* end_str = strtok(NULL, ",");
+    char* step_str = strtok(NULL, ",");
+
+    if (!start_str || !end_str || !step_str) {
+        uart_puts(UART_ID, "ERR: Missing scan parameters.\n");
+        scan_mode = false;
+        return;
+    }
+
+    uint32_t start_khz = atoi(start_str);
+    uint32_t end_khz = atoi(end_str);
+    uint32_t step_khz = atoi(step_str);
+
+    if (step_khz == 0) step_khz = 50;
+
+    for (uint32_t current_khz = start_khz; current_khz <= end_khz; current_khz += step_khz) {
+        // Check if a stop command has been received
+        if (uart_is_readable(UART_ID) && uart_getc(UART_ID) == 'E') {
+            handle_uart_command("E");
+            break;
+        }
+
+        cc1101_set_frequency(current_khz);
+        cc1101_strobe(CC1101_SRX);
+        sleep_ms(20); // Let receiver settle
+
+        uint8_t rssi_raw = cc1101_read_status_reg(CC1101_RSSI);
+        int16_t rssi_dbm = convert_rssi(rssi_raw);
+
+        char scan_msg[40];
+        sprintf(scan_msg, "SCAN:%lu,%d\n", current_khz, rssi_dbm);
+        uart_puts(UART_ID, scan_msg);
+    }
+
+    cc1101_strobe(CC1101_SIDLE);
+    uart_puts(UART_ID, "OK: Frequency scan finished.\n");
+    scan_mode = false;
+}
+
 void capture_pulses() {
     pulse_count = 0;
-
     cc1101_strobe(CC1101_SRX);
-
-    // Wait for the first edge (transition from idle low to high)
     uint32_t start_time = time_us_32();
     while(!gpio_get(CC1101_PIN_GDO0)) {
-        if (time_us_32() - start_time > 2000000) { // 2 second timeout
-            uart_puts(UART_ID, "ERR: Capture timed out waiting for signal.\n");
+        if (time_us_32() - start_time > 2000000) {
+            uart_puts(UART_ID, "ERR: Capture timed out.\n");
             cc1101_strobe(CC1101_SIDLE);
             return;
         }
     }
-
-    // Start capturing edges
     bool current_state = gpio_get(CC1101_PIN_GDO0);
     uint32_t last_edge_time = time_us_32();
-
-    while(pulse_count < PULSE_BUFFER_SIZE && (time_us_32() - start_time < 5000000)) { // 5 sec total capture
+    while(pulse_count < PULSE_BUFFER_SIZE && (time_us_32() - start_time < 5000000)) {
         bool new_state = gpio_get(CC1101_PIN_GDO0);
         if (new_state != current_state) {
             uint32_t now = time_us_32();
@@ -150,15 +200,11 @@ void capture_pulses() {
             last_edge_time = now;
             current_state = new_state;
         }
-        // Increased timeout between edges to allow for gaps between transmissions
-        if (time_us_32() - last_edge_time > 300000) { // 300ms
+        if (time_us_32() - last_edge_time > 300000) {
             break;
         }
     }
-
     cc1101_strobe(CC1101_SIDLE);
-
-    // Send captured pulse data to PC
     if (pulse_count > 0) {
         char temp_buf[20];
         uart_puts(UART_ID, "PULSE:");
@@ -171,7 +217,6 @@ void capture_pulses() {
         uart_puts(UART_ID, "ERR: No pulses captured.\n");
     }
 }
-
 
 void dump_registers() {
     uart_puts(UART_ID, "--- CC1101 Registers ---\n");
