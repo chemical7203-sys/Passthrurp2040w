@@ -57,14 +57,11 @@ target_include_directories(RP PRIVATE
 )
 
 # Add any user requested libraries
-target_link_libraries(RP 
-        hardware_i2c
-        hardware_dma
+target_link_libraries(RP
+        hardware_spi
         hardware_pio
-        hardware_interp
         hardware_timer
         hardware_clocks
-        pico_cyw43_arch_lwip_poll
         )
 
 pico_add_extra_outputs(RP)
