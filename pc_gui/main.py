@@ -1,11 +1,23 @@
 import sys
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import QTimer
-from gamepad_ui import GamepadUI, GamepadSignals
+from PyQt6.QtCore import pyqtSignal, QObject
+from gamepad_ui import GamepadUI
 from ds4_handler import DS4Handler
 from serial_handler import SerialHandler
 # device_manager is no longer needed
 from queue import Queue
+
+class GamepadSignals(QObject):
+    stick_event = pyqtSignal(str, float)
+    button_event = pyqtSignal(str, bool)
+    trigger_event = pyqtSignal(str, float)
+    imu_event = pyqtSignal(float, float, float, float, float, float)
+    gamepad_disconnected = pyqtSignal()
+    device_changed = pyqtSignal()
+    gamepad_list_updated = pyqtSignal(list)
+    raw_event = pyqtSignal(str)
+    gamepad_connected = pyqtSignal()
 
 class MainApplication:
     def __init__(self):
@@ -19,6 +31,7 @@ class MainApplication:
 
         self.serial_state = {
             'buttons': 0, 'dpad': 0, 'lx': 0, 'ly': 0, 'rx': 0, 'ry': 0, 'l2': 0, 'r2': 0,
+            'ax': 0, 'ay': 0, 'az': 0, 'gx': 0, 'gy': 0, 'gz': 0,
         }
         self.button_map = {
             'BTN_SOUTH': ('buttons', 1<<0), 'BTN_EAST': ('buttons', 1<<1),
@@ -61,6 +74,15 @@ class MainApplication:
         self.gamepad_signals.stick_event.connect(self.update_serial_state)
         self.gamepad_signals.button_event.connect(self.update_serial_state)
         self.gamepad_signals.trigger_event.connect(self.update_serial_state)
+        self.gamepad_signals.imu_event.connect(self.update_imu_state)
+
+    def update_imu_state(self, ax, ay, az, gx, gy, gz):
+        self.serial_state['ax'] = int(ax)
+        self.serial_state['ay'] = int(ay)
+        self.serial_state['az'] = int(az)
+        self.serial_state['gx'] = int(gx)
+        self.serial_state['gy'] = int(gy)
+        self.serial_state['gz'] = int(gz)
 
     def update_rx_monitor(self):
         lines = self.serial_handler.get_all_received_lines()
@@ -134,7 +156,7 @@ class MainApplication:
 
     def send_latest_serial_state(self):
         if self.serial_handler.ser and self.serial_handler.ser.is_open:
-            self.serial_handler.send_gamepad_state_v2(self.serial_state)
+            self.serial_handler.send_gamepad_state_v3(self.serial_state)
 
     def run(self):
         self.ui.show()

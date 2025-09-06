@@ -79,28 +79,28 @@ class SerialHandler:
                 break
         return lines
 
-    def _create_packet_v2(self, state):
+    def _create_packet_v3(self, state):
         buttons = state.get('buttons', 0); dpad = state.get('dpad', 0)
         lx = max(-127, min(127, state.get('lx', 0))); ly = max(-127, min(127, state.get('ly', 0)))
         rx = max(-127, min(127, state.get('rx', 0))); ry = max(-127, min(127, state.get('ry', 0)))
         l2 = max(0, min(255, state.get('l2', 0))); r2 = max(0, min(255, state.get('r2', 0)))
 
-        dummy_start = 0x00
-        dummy_end = 0x00
-        header = 0xA6
+        ax = state.get('ax', 0); ay = state.get('ay', 0); az = state.get('az', 0)
+        gx = state.get('gx', 0); gy = state.get('gy', 0); gz = state.get('gz', 0)
 
-        # 1. Construct the 11-byte padded payload
-        payload = struct.pack('<BH4b2BBB', dummy_start, buttons, lx, ly, rx, ry, l2, r2, dpad, dummy_end)
+        header = 0xA7
 
-        # 2. Calculate checksum over the header and the 11-byte padded payload
+        # Payload: buttons (2), lx,ly,rx,ry (4), l2,r2 (2), dpad (1), ax,ay,az,gx,gy,gz (6*2=12) -> 21 bytes
+        payload = struct.pack('<H4b2BB6h', buttons, lx, ly, rx, ry, l2, r2, dpad, ax, ay, az, gx, gy, gz)
+
+        # Calculate checksum over the header and the payload
         checksum = header
         for byte in payload:
             checksum ^= byte
 
-        # 3. Return the final 13-byte packet
         return bytearray([header]) + payload + bytearray([checksum])
 
-    def send_gamepad_state_v2(self, state):
+    def send_gamepad_state_v3(self, state):
         if not self.ser or not self.ser.is_open: return
-        packet = self._create_packet_v2(state)
+        packet = self._create_packet_v3(state)
         self.ser.write(packet)
