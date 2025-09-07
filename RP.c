@@ -114,10 +114,9 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
         subcommand_id = buffer[10];
         arg_offset = 11;
     } else if (report_id == RUMBLE_ONLY_REPORT_ID) { // 0x10
-        // This is a rumble-only report, no subcommand to ACK
         return;
     } else {
-        return; // Unknown report ID
+        return;
     }
 
     switch_subcommand_response_t resp = {0};
@@ -130,31 +129,34 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
 
     switch (subcommand_id) {
         case SUBCOMMAND_REQUEST_DEVICE_INFO: {
-            resp.ack = 0x82; // ACK with data for this subcommand
+            resp.ack = 0x82;
             resp.subcommand_id = subcommand_id;
             switch_device_info_t* info = (switch_device_info_t*)resp.payload;
             info->fw_version = 0x9104;
             info->controller_type = SWITCH_TYPE_PRO_CONTROLLER;
             info->mac_address[0] = 0xDE; info->mac_address[1] = 0xAD; info->mac_address[2] = 0xBE;
             info->mac_address[3] = 0xEF; info->mac_address[4] = 0xFE; info->mac_address[5] = 0xED;
+            info->unknown_1 = 0x02;
+            info->unknown_2 = 0x01;
+            info->use_spi_colors = 0x01;
             tud_hid_report(0, &resp, sizeof(resp));
             break;
         }
         case SUBCOMMAND_SET_INPUT_REPORT_MODE:
             pro_controller_state.input_mode = buffer[arg_offset];
-            resp.ack = 0x80; // Standard ACK
+            resp.ack = 0x80;
             resp.subcommand_id = subcommand_id;
-            tud_hid_report(0, &resp, 16); // Send a minimal ACK
+            tud_hid_report(0, &resp, 16);
             break;
         case SUBCOMMAND_ENABLE_IMU:
             pro_controller_state.imu_enabled = (buffer[arg_offset] == 0x01);
             resp.ack = 0x80;
             resp.subcommand_id = subcommand_id;
             tud_hid_report(0, &resp, 16);
-            pro_controller_state.is_ready = true; // Assume ready after this command
+            pro_controller_state.is_ready = true;
             break;
         case SUBCOMMAND_SPI_FLASH_READ:
-            resp.ack = 0x90; // ACK with data
+            resp.ack = 0x90;
             resp.subcommand_id = subcommand_id;
             memcpy(resp.payload, &buffer[arg_offset], 5);
             memset(resp.payload + 5, 0xFF, 32);
@@ -181,7 +183,7 @@ uint8_t dpad_to_switch_hat(uint8_t dpad_mask) {
 
 void hid_task(void) {
     static uint32_t last_report_ms = 0;
-    if (board_millis() - last_report_ms < 5) return; // Send reports slightly more often
+    if (board_millis() - last_report_ms < 5) return;
     last_report_ms = board_millis();
 
     if (tud_suspended()) tud_remote_wakeup();
@@ -191,20 +193,14 @@ void hid_task(void) {
         report.report_id = STANDARD_INPUT_REPORT_ID;
         report.timer = report_counter++;
 
-        // Button Mapping - Corrected based on switch_report.h masks
-        // Input `gamepad_data.buttons` bits:
-        // 0:B, 1:A, 2:Y, 3:X, 4:L, 5:R, 8:-, 9:+, 10:L3, 11:R3, 12:Home, 13:Capture
-        // Triggers l2/r2 are separate.
+        // Button Mapping
+        if (gamepad_data.buttons & (1 << 2)) report.inputs.buttons_right |= SWITCH_MASK_Y;
+        if (gamepad_data.buttons & (1 << 3)) report.inputs.buttons_right |= SWITCH_MASK_X;
+        if (gamepad_data.buttons & (1 << 0)) report.inputs.buttons_right |= SWITCH_MASK_B;
+        if (gamepad_data.buttons & (1 << 1)) report.inputs.buttons_right |= SWITCH_MASK_A;
+        if (gamepad_data.buttons & (1 << 5)) report.inputs.buttons_right |= SWITCH_MASK_R;
+        if (gamepad_data.r2 > 30)            report.inputs.buttons_right |= SWITCH_MASK_ZR;
 
-        // Right-side buttons
-        if (gamepad_data.buttons & (1 << 2)) report.inputs.buttons_right |= SWITCH_MASK_Y; // Y
-        if (gamepad_data.buttons & (1 << 3)) report.inputs.buttons_right |= SWITCH_MASK_X; // X
-        if (gamepad_data.buttons & (1 << 0)) report.inputs.buttons_right |= SWITCH_MASK_B; // B
-        if (gamepad_data.buttons & (1 << 1)) report.inputs.buttons_right |= SWITCH_MASK_A; // A
-        if (gamepad_data.buttons & (1 << 5)) report.inputs.buttons_right |= SWITCH_MASK_R; // R
-        if (gamepad_data.r2 > 30)            report.inputs.buttons_right |= SWITCH_MASK_ZR;// ZR
-
-        // Middle buttons
         if (gamepad_data.buttons & (1 << 8)) report.inputs.buttons_middle |= SWITCH_MASK_MINUS;
         if (gamepad_data.buttons & (1 << 9)) report.inputs.buttons_middle |= SWITCH_MASK_PLUS;
         if (gamepad_data.buttons & (1 << 11)) report.inputs.buttons_middle |= SWITCH_MASK_R3;
@@ -212,7 +208,6 @@ void hid_task(void) {
         if (gamepad_data.buttons & (1 << 12)) report.inputs.buttons_middle |= SWITCH_MASK_HOME;
         if (gamepad_data.buttons & (1 << 13)) report.inputs.buttons_middle |= SWITCH_MASK_CAPTURE;
 
-        // Left-side buttons and D-pad
         uint8_t hat = dpad_to_switch_hat(gamepad_data.dpad);
         if (hat == SWITCH_HAT_UP || hat == SWITCH_HAT_UPLEFT || hat == SWITCH_HAT_UPRIGHT)       report.inputs.buttons_left |= (1 << 1);
         if (hat == SWITCH_HAT_DOWN || hat == SWITCH_HAT_DOWNLEFT || hat == SWITCH_HAT_DOWNRIGHT)     report.inputs.buttons_left |= (1 << 0);
@@ -222,21 +217,18 @@ void hid_task(void) {
         if (gamepad_data.buttons & (1 << 4)) report.inputs.buttons_left |= SWITCH_MASK_L;
         if (gamepad_data.l2 > 30)            report.inputs.buttons_left |= SWITCH_MASK_ZL;
 
-        // Analog Sticks (12-bit, centered at 2048)
-        // Y axes are inverted for Switch
+        // Analog Sticks
         uint16_t lx = (uint16_t)(((int16_t)gamepad_data.lx + 128) << 4);
         uint16_t ly = (uint16_t)(((int16_t)-gamepad_data.ly + 128) << 4);
         uint16_t rx = (uint16_t)(((int16_t)gamepad_data.rx + 128) << 4);
         uint16_t ry = (uint16_t)(((int16_t)-gamepad_data.ry + 128) << 4);
 
-        uint8_t stick_buffer[6];
         pack_analog_stick(lx, ly, (uint8_t*)&report.inputs.left_stick);
         pack_analog_stick(rx, ry, (uint8_t*)&report.inputs.right_stick);
 
         // IMU
         if (pro_controller_state.imu_enabled) {
             int16_t* imu_payload = (int16_t*)report.imu_data;
-            // The Switch report sends 3 samples of IMU data. We'll just repeat our one sample.
             for (int i = 0; i < 3; i++) {
                 imu_payload[i*6 + 0] = gamepad_data.ax;
                 imu_payload[i*6 + 1] = gamepad_data.ay;

@@ -77,7 +77,7 @@ uint8_t const desc_hid_report[] = {
     0x09, 0x32,        //   Usage (Z)
     0x09, 0x35,        //   Usage (Rz)
     0x16, 0x00, 0x00,  //   Logical Minimum (0)
-    0x26, 0xFF, 0xFF,  //   Logical Maximum (65535)
+    0x26, 0xFF, 0x0F,  //   Logical Maximum (4095) - This is 12-bit, but report size is 16. Let's trust GP2040-CE
     0x75, 0x10,        //   Report Size (16)
     0x95, 0x04,        //   Report Count (4)
     0x81, 0x02,        //   Input (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
@@ -117,14 +117,14 @@ uint8_t const * tud_hid_descriptor_report_cb(uint8_t instance) {
 // Configuration Descriptor
 //--------------------------------------------------------------------+
 #define CONFIG_TOTAL_LEN  (TUD_CONFIG_DESC_LEN + TUD_HID_INOUT_DESC_LEN)
-#define EPNUM_HID_IN      0x81
 #define EPNUM_HID_OUT     0x01
+#define EPNUM_HID_IN      0x81
 
 uint8_t const desc_configuration[] = {
     // Config number, interface count, string index, total length, attribute, power in mA
     TUD_CONFIG_DESCRIPTOR(1, 1, 0, CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 500),
     // Interface number, string index, protocol, report descriptor len, EP In & Out address, size, interval
-    TUD_HID_INOUT_DESCRIPTOR(0, 0, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report), EPNUM_HID_IN, EPNUM_HID_OUT, CFG_TUD_HID_EP_BUFSIZE, 8)
+    TUD_HID_INOUT_DESCRIPTOR(0, 0, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report), EPNUM_HID_IN, EPNUM_HID_OUT, SWITCH_PRO_ENDPOINT_SIZE, 8)
 };
 
 uint8_t const * tud_descriptor_configuration_cb(uint8_t index) {

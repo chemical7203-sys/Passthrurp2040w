@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: MIT
- * SPDX-FileCopyrightText: Copyright (c) 2021 Jason Skuby (mytechtoybox.com)
- * SPDX-FileCopyrightText: Copyright (c) 2023 Jules Blok
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2023, The GP2040-CE Project Team
+ * SPDX-FileCopyrightText: Copyright (c) 2023, Jules Blok
  */
 
 #pragma once
@@ -30,9 +30,9 @@
 #define SWITCH_MASK_A       (1U << 2)
 #define SWITCH_MASK_X       (1U << 3)
 #define SWITCH_MASK_L       (1U << 6)
-#define SWITCH_MASK_R       (1U << 6)
+#define SWITCH_MASK_R       (1U << 6) // Note: L and R have same bit in different bytes
 #define SWITCH_MASK_ZL      (1U << 7)
-#define SWITCH_MASK_ZR      (1U << 7)
+#define SWITCH_MASK_ZR      (1U << 7) // Note: ZL and ZR have same bit in different bytes
 #define SWITCH_MASK_MINUS   (1U << 0)
 #define SWITCH_MASK_PLUS    (1U << 1)
 #define SWITCH_MASK_L3      (1U << 3)
@@ -68,12 +68,12 @@ typedef enum {
 } switch_controller_type_t;
 
 // Structs for report building
-typedef struct __attribute((packed, aligned(1)))
+typedef struct __attribute__((packed, aligned(1)))
 {
     uint8_t data[3];
 } switch_analog_stick_t;
 
-typedef struct __attribute((packed, aligned(1)))
+typedef struct __attribute__((packed, aligned(1)))
 {
     uint8_t buttons_right;
     uint8_t buttons_middle;
@@ -82,7 +82,8 @@ typedef struct __attribute((packed, aligned(1)))
     switch_analog_stick_t right_stick;
 } switch_input_report_t;
 
-typedef struct __attribute((packed, aligned(1)))
+// This is the main 64-byte report sent to the host
+typedef struct __attribute__((packed, aligned(1)))
 {
     uint8_t report_id;
     uint8_t timer;
@@ -93,21 +94,27 @@ typedef struct __attribute((packed, aligned(1)))
 } switch_pro_report_t;
 
 // For responding to 0x02 subcommand
-typedef struct __attribute((packed, aligned(1)))
+typedef struct __attribute__((packed, aligned(1)))
 {
     uint16_t fw_version;
     uint8_t controller_type;
+    uint8_t unknown_1; // 0x02
     uint8_t mac_address[6];
-    uint8_t unknown[2];
+    uint8_t unknown_2; // 0x01
+    uint8_t use_spi_colors; // 0x01
 } switch_device_info_t;
 
 // For ACKing subcommands
-typedef struct __attribute((packed, aligned(1)))
+typedef struct __attribute__((packed, aligned(1)))
 {
-    uint8_t report_id;
+    uint8_t report_id; // 0x21
     uint8_t timer;
-    uint8_t buttons[3];
+    // Followed by standard input report data...
+    uint8_t buttons_right;
+    uint8_t buttons_middle;
+    uint8_t buttons_left;
     uint8_t sticks[6];
+    // Followed by ACK payload
     uint8_t ack;
     uint8_t subcommand_id;
     uint8_t payload[37];
