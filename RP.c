@@ -37,6 +37,10 @@ absolute_time_t last_edge_time;
 uint32_t stored_pulse_timings[MAX_PULSES];
 uint16_t stored_pulse_count = 0;
 
+// -- START DEBUGGING VARIABLES --
+volatile uint32_t isr_fire_count = 0;
+// -- END DEBUGGING VARIABLES --
+
 // State machine for device operation
 typedef enum {
     STATE_IDLE,
@@ -191,6 +195,7 @@ void transmit_signal(uint32_t* timings, uint16_t count);
 
 
 void gpio_callback(uint gpio, uint32_t events) {
+    isr_fire_count++; // DEBUG: Increment fire count
     // This check prevents the ISR from running while the main loop is processing data
     if (capture_done) {
         return;
@@ -301,7 +306,19 @@ int main()
 
     uart_puts(UART_ID, "STATUS:Ready\n");
 
+    // -- START DEBUGGING VARIABLES --
+    char debug_buf[128];
+    uint32_t last_isr_count_printed = 0;
+    // -- END DEBUGGING VARIABLES --
+
     while (true) {
+        // --- DEBUG LOG: Print if ISR has fired ---
+        if (isr_fire_count != last_isr_count_printed) {
+            sprintf(debug_buf, "DEBUG: ISR has fired. Total count: %lu\n", isr_fire_count);
+            uart_puts(UART_ID, debug_buf);
+            last_isr_count_printed = isr_fire_count;
+        }
+
         // --- 1. Handle incoming commands from PC ---
         if (uart_is_readable(UART_ID)) {
             char cmd = uart_getc(UART_ID);
@@ -309,24 +326,32 @@ int main()
             if (cmd == 'c' && current_state == STATE_IDLE) {
                 current_state = STATE_ARMED_TO_CAPTURE;
                 pulse_count = 0;
+                isr_fire_count = 0; // Reset debug counter
+                last_isr_count_printed = 0;
                 capture_done = false;
                 last_edge_time = get_absolute_time();
                 gpio_set_irq_enabled(GDO0_PIN, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true);
                 uart_puts(UART_ID, "STATUS:Armed\n");
             } else if (cmd == 't' && current_state == STATE_IDLE) {
                 transmit_signal(stored_pulse_timings, stored_pulse_count);
-                // After transmitting, we are ready for a new command
                 uart_puts(UART_ID, "STATUS:Ready\n");
             }
         }
 
         // --- 2. State Machine Logic ---
         if (current_state == STATE_ARMED_TO_CAPTURE) {
+            // --- DEBUG LOG: Print current state of timeout variables ---
+            uint64_t time_diff_us = absolute_time_diff_us(last_edge_time, get_absolute_time());
+            sprintf(debug_buf, "DEBUG: ARMED | pulse_count: %u | time_diff: %llu us\n", pulse_count, time_diff_us);
+            uart_puts(UART_ID, debug_buf);
+
             // Timeout check
-            if (!capture_done && pulse_count > 0 && absolute_time_diff_us(last_edge_time, get_absolute_time()) > END_OF_TRANSMISSION_US) {
+            if (!capture_done && pulse_count > 0 && time_diff_us > END_OF_TRANSMISSION_US) {
                 if (pulse_count > 10) {
+                    uart_puts(UART_ID, "DEBUG: Capture condition met. Finishing capture.\n");
                     capture_done = true;
                 } else {
+                    uart_puts(UART_ID, "DEBUG: Timeout with too few pulses. Resetting as noise.\n");
                     pulse_count = 0;
                 }
             }
@@ -335,16 +360,14 @@ int main()
             if (capture_done) {
                 gpio_set_irq_enabled(GDO0_PIN, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, false);
 
-                // Store the captured signal
                 memcpy(stored_pulse_timings, (void*)pulse_timings, pulse_count * sizeof(uint32_t));
                 stored_pulse_count = pulse_count;
 
-                // Send data to PC
                 uart_puts(UART_ID, "DATA:");
-                char uart_buf[16];
+                char uart_buf_data[16];
                 for (int i = 0; i < pulse_count; i++) {
-                    sprintf(uart_buf, "%lu", stored_pulse_timings[i]);
-                    uart_puts(UART_ID, uart_buf);
+                    sprintf(uart_buf_data, "%lu", stored_pulse_timings[i]);
+                    uart_puts(UART_ID, uart_buf_data);
                     if (i < pulse_count - 1) {
                         uart_puts(UART_ID, ",");
                     }
@@ -356,7 +379,11 @@ int main()
             }
         }
 
-        sleep_ms(1);
+        if(current_state == STATE_ARMED_TO_CAPTURE) {
+            sleep_ms(100); // Poll faster when armed for debugging, but not so fast we can't read the logs.
+        } else {
+            sleep_ms(500); // Poll slower when idle.
+        }
     }
 
     return 0;
