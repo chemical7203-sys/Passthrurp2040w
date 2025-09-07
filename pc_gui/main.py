@@ -48,7 +48,7 @@ class MainApplication:
         # Remove old gamepad UI controls that are no longer needed
         self.ui.gamepad_refresh_btn.hide()
         self.ui.gamepad_select.hide()
-        self.ui.gamepad_label.setText("Pro Controller (HID)")
+        # self.ui.gamepad_label.setText("Pro Controller (HID)") # This label doesn't exist
 
         self.ui.serial_connect_btn.clicked.connect(self.toggle_serial_connection)
         self.ui.serial_refresh_btn.clicked.connect(self.refresh_serial_ports)
