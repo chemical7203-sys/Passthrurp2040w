@@ -171,9 +171,11 @@ void hid_task(void) {
       report.r2_trigger = gamepad_data.r2;
       report.dpad = dpad_to_ds4_hat(gamepad_data.dpad);
 
-      if (gamepad_data.buttons & (1 << 0))  report.square = 1;
-      if (gamepad_data.buttons & (1 << 1))  report.cross = 1;
-      if (gamepad_data.buttons & (1 << 2))  report.circle = 1;
+      // Corrected button mapping based on pc_gui
+      // UART bit 0: Cross, 1: Circle, 2: Square, 3: Triangle
+      if (gamepad_data.buttons & (1 << 0))  report.cross = 1;
+      if (gamepad_data.buttons & (1 << 1))  report.circle = 1;
+      if (gamepad_data.buttons & (1 << 2))  report.square = 1;
       if (gamepad_data.buttons & (1 << 3))  report.triangle = 1;
       if (gamepad_data.buttons & (1 << 4))  report.l1 = 1;
       if (gamepad_data.buttons & (1 << 5))  report.r1 = 1;
