@@ -1,0 +1,42 @@
+;
+; PIO program to transmit a signal with precise timing.
+;
+.program signal_transmit
+
+; This program pulls duration values from the TX FIFO and generates
+; a corresponding waveform on an output pin.
+; The output pin is the 'set' pin base.
+; The first value is the high pulse duration, the second is the low, and so on.
+
+.wrap_target
+    ; --- Generate High Pulse ---
+    pull block          ; Pull a value from TX FIFO. Blocks if empty.
+    mov x, osr          ; Move value from Output Shift Register (OSR) to X.
+
+high_loop:
+    set pins, 1 [31]    ; Set output pin high. The delay helps meet timing.
+    jmp x-- high_loop   ; Loop for X cycles.
+
+    ; --- Generate Low Pulse ---
+    pull block          ; Pull the next value for the low pulse.
+    mov x, osr
+
+low_loop:
+    set pins, 0 [31]    ; Set output pin low.
+    jmp x-- low_loop    ; Loop for X cycles.
+.wrap
+
+
+% c-sdk {
+static inline void signal_transmit_program_init(PIO pio, uint sm, uint offset, uint pin, float div) {
+    pio_gpio_init(pio, pin);
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true); // Set pin as output
+
+    pio_sm_config c = signal_transmit_program_get_default_config(offset);
+    sm_config_set_set_pins(&c, pin, 1); // Configure the 'set' pin group
+    sm_config_set_clkdiv(&c, div);
+
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}

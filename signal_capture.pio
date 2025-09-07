@@ -1,0 +1,51 @@
+.program signal_capture
+
+.wrap_target
+    ; --- Measure High Pulse ---
+    ; Wait for a rising edge, then start counting
+    wait 1 pin 0
+    mov x, !null        ; Reset counter X to max value (0xFFFFFFFF)
+
+count_high:
+    jmp pin end_high    ; Jump if pin is low (high pulse ended)
+    jmp x-- count_high  ; Pin is still high, decrement counter and loop
+end_high:
+    mov isr, !x         ; Invert X to get the duration, move to ISR
+    push noblock        ; Push high pulse duration to RX FIFO, don't wait if full
+
+    ; --- Measure Low Pulse ---
+    ; Pin is already low. Start counting.
+    mov x, !null        ; Reset counter X
+
+count_low:
+    jmp pin end_low     ; Jump if pin is high (low pulse ended)
+    jmp x-- count_low   ; Pin is still low, decrement counter and loop
+end_low:
+    mov isr, !x         ; Invert X to get the duration, move to ISR
+    push noblock        ; Push low pulse duration to RX FIFO
+
+.wrap
+
+
+% c-sdk {
+#include "hardware/clocks.h"
+
+static inline void signal_capture_program_init(PIO pio, uint sm, uint offset, uint pin, float div) {
+    // Configure the PIO state machine.
+    pio_sm_config c = signal_capture_program_get_default_config(offset);
+
+    // Set the 'in' pins, and the 'jmp' pin. The jmp pin is used by the jmp pin instruction.
+    sm_config_set_in_pins(&c, pin);
+    sm_config_set_jmp_pin(&c, pin);
+
+    // Set the pin directions to input at the PIO
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
+
+    // PIO SM clock divider.
+    sm_config_set_clkdiv(&c, div);
+
+    // Load our configuration, and start the state machine.
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}

@@ -1,167 +1,128 @@
 #include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
 #include "pico/stdlib.h"
-#include "hardware/i2c.h"
-#include "hardware/dma.h"
 #include "hardware/pio.h"
-#include "hardware/interp.h"
-#include "hardware/timer.h"
 #include "hardware/clocks.h"
-#include "pico/cyw43_arch.h"
 #include "hardware/uart.h"
+#include "cc1101_driver.h"
 
-// I2C defines
-// This example will use I2C0 on GPIO8 (SDA) and GPIO9 (SCL) running at 400KHz.
-// Pins can be changed, see the GPIO function select table in the datasheet for information on GPIO assignments
-#define I2C_PORT i2c0
-#define I2C_SDA 8
-#define I2C_SCL 9
+#include "signal_capture.pio.h"
+#include "signal_transmit.pio.h"
 
-// Data will be copied from src to dst
-const char src[] = "Hello, world! (from DMA)";
-char dst[count_of(src)];
+#define CAPTURE_SIZE 200
+#define UART_BUFFER_SIZE 2048
 
-#include "blink.pio.h"
-
-void blink_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint freq) {
-    blink_program_init(pio, sm, offset, pin);
-    pio_sm_set_enabled(pio, sm, true);
-
-    printf("Blinking pin %d at %d Hz\n", pin, freq);
-
-    // PIO counter program takes 3 more cycles in total than we pass as
-    // input (wait for n + 1; mov; jmp)
-    pio->txf[sm] = (125000000 / (2 * freq)) - 3;
+// Helper function to read a line from UART
+int read_line(char *buffer, int max_len) {
+    int i = 0;
+    while (i < max_len - 1) {
+        int c = getchar_timeout_us(1000 * 1000); // 1 second timeout
+        if (c == PICO_ERROR_TIMEOUT) return -1;
+        if (c == '\n' || c == '\r') break;
+        buffer[i++] = (char)c;
+    }
+    buffer[i] = '\0';
+    return i;
 }
-
-
-int64_t alarm_callback(alarm_id_t id, void *user_data) {
-    // Put your timeout handler code in here
-    return 0;
-}
-
-
-
-// UART defines
-// By default the stdout UART is `uart0`, so we will use the second one
-#define UART_ID uart1
-#define BAUD_RATE 115200
-
-// Use pins 4 and 5 for UART1
-// Pins can be changed, see the GPIO function select table in the datasheet for information on GPIO assignments
-#define UART_TX_PIN 4
-#define UART_RX_PIN 5
-
-
 
 int main()
 {
     stdio_init_all();
+    sleep_ms(2000); // Wait for serial monitor to connect
 
-    // Initialise the Wi-Fi chip
-    if (cyw43_arch_init()) {
-        printf("Wi-Fi init failed\n");
-        return -1;
-    }
+    cc1101_init();
 
-    // I2C Initialisation. Using it at 400Khz.
-    i2c_init(I2C_PORT, 400*1000);
-    
-    gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
-    gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
-    gpio_pull_up(I2C_SDA);
-    gpio_pull_up(I2C_SCL);
-    // For more examples of I2C use see https://github.com/raspberrypi/pico-examples/tree/master/i2c
+    printf("RP2040 CC1101 Signal Cloner\n");
+    printf("Send 'c' to start capture.\n");
+    printf("Send 't' to start transmit, followed by comma-separated pulse durations in us on a new line.\n");
 
-    // Get a free channel, panic() if there are none
-    int chan = dma_claim_unused_channel(true);
-    
-    // 8 bit transfers. Both read and write address increment after each
-    // transfer (each pointing to a location in src or dst respectively).
-    // No DREQ is selected, so the DMA transfers as fast as it can.
-    
-    dma_channel_config c = dma_channel_get_default_config(chan);
-    channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
-    channel_config_set_read_increment(&c, true);
-    channel_config_set_write_increment(&c, true);
-    
-    dma_channel_configure(
-        chan,          // Channel to be configured
-        &c,            // The configuration we just created
-        dst,           // The initial write address
-        src,           // The initial read address
-        count_of(src), // Number of transfers; in this case each is 1 byte.
-        true           // Start immediately.
-    );
-    
-    // We could choose to go and do something else whilst the DMA is doing its
-    // thing. In this case the processor has nothing else to do, so we just
-    // wait for the DMA to finish.
-    dma_channel_wait_for_finish_blocking(chan);
-    
-    // The DMA has now copied our text from the transmit buffer (src) to the
-    // receive buffer (dst), so we can print it out from there.
-    puts(dst);
-
-    // PIO Blinking example
-    PIO pio = pio0;
-    uint offset = pio_add_program(pio, &blink_program);
-    printf("Loaded program at %d\n", offset);
-    
-    #ifdef PICO_DEFAULT_LED_PIN
-    blink_pin_forever(pio, 0, offset, PICO_DEFAULT_LED_PIN, 3);
-    #else
-    blink_pin_forever(pio, 0, offset, 6, 3);
-    #endif
-    // For more pio examples see https://github.com/raspberrypi/pico-examples/tree/master/pio
-
-    // Interpolator example code
-    interp_config cfg = interp_default_config();
-    // Now use the various interpolator library functions for your use case
-    // e.g. interp_config_clamp(&cfg, true);
-    //      interp_config_shift(&cfg, 2);
-    // Then set the config 
-    interp_set_config(interp0, 0, &cfg);
-    // For examples of interpolator use see https://github.com/raspberrypi/pico-examples/tree/master/interp
-
-    // Timer example code - This example fires off the callback after 2000ms
-    add_alarm_in_ms(2000, alarm_callback, NULL, false);
-    // For more examples of timer use see https://github.com/raspberrypi/pico-examples/tree/master/timer
-
-    printf("System Clock Frequency is %d Hz\n", clock_get_hz(clk_sys));
-    printf("USB Clock Frequency is %d Hz\n", clock_get_hz(clk_usb));
-    // For more examples of clocks use see https://github.com/raspberrypi/pico-examples/tree/master/clocks
-
-    // Enable wifi station
-    cyw43_arch_enable_sta_mode();
-
-    printf("Connecting to Wi-Fi...\n");
-    if (cyw43_arch_wifi_connect_timeout_ms("Your Wi-Fi SSID", "Your Wi-Fi Password", CYW43_AUTH_WPA2_AES_PSK, 30000)) {
-        printf("failed to connect.\n");
-        return 1;
-    } else {
-        printf("Connected.\n");
-        // Read the ip address in a human readable way
-        uint8_t *ip_address = (uint8_t*)&(cyw43_state.netif[0].ip_addr.addr);
-        printf("IP address %d.%d.%d.%d\n", ip_address[0], ip_address[1], ip_address[2], ip_address[3]);
-    }
-
-    // Set up our UART
-    uart_init(UART_ID, BAUD_RATE);
-    // Set the TX and RX pins by using the function select on the GPIO
-    // Set datasheet for more information on function select
-    gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
-    gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
-    
-    // Use some the various UART functions to send out data
-    // In a default system, printf will also output via the default UART
-    
-    // Send out a string, with CR/LF conversions
-    uart_puts(UART_ID, " Hello, UART!\n");
-    
-    // For more examples of UART use see https://github.com/raspberrypi/pico-examples/tree/master/uart
-
+    // The main loop
     while (true) {
-        printf("Hello, world!\n");
-        sleep_ms(1000);
+        int c = getchar_timeout_us(10000);
+
+        if (c == 'c') {
+            printf("Starting capture for %d pulses...\n", CAPTURE_SIZE);
+
+            PIO pio = pio0;
+            uint sm = pio_claim_unused_sm(pio, true);
+            uint offset = pio_add_program(pio, &signal_capture_program);
+
+            float clk_div = 1.0f;
+            signal_capture_program_init(pio, sm, offset, PIN_GDO0, clk_div);
+
+            cc1101_strobe(SRX);
+            sleep_ms(1);
+
+            uint32_t captured_data[CAPTURE_SIZE];
+            for (int i = 0; i < CAPTURE_SIZE; ++i) {
+                captured_data[i] = pio_sm_get_blocking(pio, sm);
+            }
+
+            pio_sm_set_enabled(pio, sm, false);
+            pio_remove_program(pio, &signal_capture_program, offset);
+            pio_sm_unclaim(pio, sm);
+            cc1101_strobe(SIDLE);
+
+            printf("Capture finished. Data (in microseconds):\n");
+            float sys_clk_mhz = (float)clock_get_hz(clk_sys) / 1000000.f;
+            for (int i = 0; i < CAPTURE_SIZE; ++i) {
+                uint32_t raw_value = captured_data[i];
+                float duration_us = (float)(0xFFFFFFFF - raw_value) * 2.f / sys_clk_mhz;
+                printf("%.2f%s", duration_us, (i == CAPTURE_SIZE - 1) ? "" : ",");
+            }
+            printf("\n");
+
+        } else if (c == 't') {
+            printf("Waiting for transmit data...\n");
+
+            static char uart_buf[UART_BUFFER_SIZE];
+            int len = read_line(uart_buf, sizeof(uart_buf));
+
+            if (len <= 0) {
+                printf("Failed to read transmit data.\n");
+                continue;
+            }
+            printf("Received %d bytes. Parsing and preparing for transmission...\n", len);
+
+            PIO pio = pio1;
+            uint sm = pio_claim_unused_sm(pio, true);
+            uint offset = pio_add_program(pio, &signal_transmit_program);
+
+            float sys_clk_mhz = (float)clock_get_hz(clk_sys) / 1000000.f;
+            // The transmit PIO loop takes 33 cycles.
+            float cycles_per_us = sys_clk_mhz / 33.0f;
+
+            char *token = strtok(uart_buf, ",");
+            int pulse_count = 0;
+            while(token != NULL) {
+                float duration_us = strtof(token, NULL);
+                if (duration_us > 0) {
+                    uint32_t pio_cycles = (uint32_t)(duration_us * cycles_per_us);
+                    pio_sm_put_blocking(pio, sm, pio_cycles);
+                    pulse_count++;
+                }
+                token = strtok(NULL, ",");
+            }
+
+            printf("Transmitting %d pulses...\n", pulse_count);
+
+            signal_transmit_program_init(pio, sm, offset, PIN_GDO2, 1.0f);
+            cc1101_strobe(STX);
+
+            // Wait for PIO to finish (TX FIFO is empty)
+            while(!pio_sm_is_tx_fifo_empty(pio, sm)) {
+                sleep_ms(1);
+            }
+            sleep_ms(10); // Allow last pulse to finish
+
+            pio_sm_set_enabled(pio, sm, false);
+            pio_remove_program(pio, &signal_transmit_program, offset);
+            pio_sm_unclaim(pio, sm);
+            cc1101_strobe(SIDLE);
+
+            printf("Transmit finished.\n");
+        }
     }
 }

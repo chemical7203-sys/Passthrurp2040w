@@ -35,13 +35,17 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(RP RP.c )
+add_executable(RP
+        RP.c
+        cc1101_driver.c
+        )
 
 pico_set_program_name(RP "RP")
 pico_set_program_version(RP "0.1")
 
-# Generate PIO header
-pico_generate_pio_header(RP ${CMAKE_CURRENT_LIST_DIR}/blink.pio)
+# Generate PIO header for signal capture
+pico_generate_pio_header(RP ${CMAKE_CURRENT_LIST_DIR}/signal_capture.pio)
+pico_generate_pio_header(RP ${CMAKE_CURRENT_LIST_DIR}/signal_transmit.pio)
 
 # Modify the below lines to enable/disable output over UART/USB
 pico_enable_stdio_uart(RP 1)
@@ -58,6 +62,7 @@ target_include_directories(RP PRIVATE
 
 # Add any user requested libraries
 target_link_libraries(RP 
+        hardware_spi
         hardware_i2c
         hardware_dma
         hardware_pio
