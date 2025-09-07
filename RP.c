@@ -201,6 +201,9 @@ void hid_task(void) {
       report.touchpad.p1.unpressed = 1;
       report.touchpad.p2.unpressed = 1;
 
+      // Final "Hello, World" test: force the Cross button to be pressed
+      report.cross = 1;
+
       memcpy(&last_sent_report, &report, sizeof(hid_ds4_report_t));
       tud_hid_report(0, &report, sizeof(report));
     #else // GENERIC
