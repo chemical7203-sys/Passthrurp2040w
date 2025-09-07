@@ -329,6 +329,8 @@ int main()
     stdio_init_all();
     setup_uart();
 
+    uart_puts(UART_ID, "Firmware starting...\n");
+
     // SPI initialisation
     spi_init(SPI_PORT, 4 * 1000 * 1000); // 4MHz
     gpio_set_function(SPI_MISO_PIN, GPIO_FUNC_SPI);
@@ -339,8 +341,8 @@ int main()
     gpio_init(SPI_CSN_PIN);
     gpio_set_dir(SPI_CSN_PIN, GPIO_OUT);
     gpio_put(SPI_CSN_PIN, 1);
-    
-    printf("CC1101 Cloner Initializing...\n");
+
+    // printf("CC1101 Cloner Initializing...\n"); // Removed to prevent potential USB hang
 
     // Initialize CC1101
     init_cc1101();
