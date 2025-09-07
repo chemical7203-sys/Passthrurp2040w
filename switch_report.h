@@ -14,7 +14,7 @@
 #define SWITCH_HAT_UPLEFT    0x07
 #define SWITCH_HAT_NOTHING   0x08
 
-// Button report (16 bits)
+// Button masks for Pro Controller
 #define SWITCH_MASK_Y       (1U << 0)
 #define SWITCH_MASK_B       (1U << 1)
 #define SWITCH_MASK_A       (1U << 2)
@@ -30,18 +30,32 @@
 #define SWITCH_MASK_HOME    (1U << 12)
 #define SWITCH_MASK_CAPTURE (1U << 13)
 
-// Switch analog sticks only report 8 bits
-#define SWITCH_JOYSTICK_MIN 0x00
-#define SWITCH_JOYSTICK_MID 0x80
-#define SWITCH_JOYSTICK_MAX 0xFF
+// Switch analog sticks are 12-bit values
+#define SWITCH_JOYSTICK_MIN 0
+#define SWITCH_JOYSTICK_MID 2048
+#define SWITCH_JOYSTICK_MAX 4095
 
+// Struct for the standard input report 0x30
 typedef struct __attribute((packed, aligned(1)))
 {
-        uint16_t buttons;
-        uint8_t hat;
-        uint8_t lx;
-        uint8_t ly;
-        uint8_t rx;
-        uint8_t ry;
-        uint8_t vendor;
-} hid_nintendo_report_t;
+    uint8_t report_id; // 0x30
+    uint8_t timer;
+    uint8_t buttons[3];
+    uint8_t sticks[6]; // 4x 12-bit values for sticks
+    uint8_t imu_data[36];
+} pro_controller_report_t;
+
+// For backwards compatibility with the old hid_task, we can keep the old struct name
+// but point it to the new, larger struct.
+typedef pro_controller_report_t hid_nintendo_report_t;
+
+
+// Nintendo-specific subcommands sent via HID Set_Report
+typedef enum {
+    SUBCOMMAND_REQUEST_DEVICE_INFO = 0x02,
+    SUBCOMMAND_SET_INPUT_REPORT_MODE = 0x03,
+    SUBCOMMAND_SET_PLAYER_LIGHTS = 0x30,
+    SUBCOMMAND_ENABLE_IMU = 0x40,
+    SUBCOMMAND_SET_IMU_SENSITIVITY = 0x41,
+    SUBCOMMAND_ENABLE_VIBRATION = 0x48,
+} nintendo_subcommand_t;
