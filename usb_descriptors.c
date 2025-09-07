@@ -173,7 +173,7 @@ uint8_t const * tud_hid_descriptor_report_cb(uint8_t instance)
 #define EPNUM_HID   0x81
 uint8_t const desc_configuration[] = {
   TUD_CONFIG_DESCRIPTOR(1, 1, 0, CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
-  TUD_HID_DESCRIPTOR(0, 0, HID_ITF_PROTOCOL_NONE, sizeof(ds4_report_descriptor), EPNUM_HID, CFG_TUD_HID_EP_BUFSIZE, 10)
+  TUD_HID_DESCRIPTOR(0, 0, HID_ITF_PROTOCOL_NONE, sizeof(ds4_report_descriptor), EPNUM_HID, CFG_TUD_HID_EP_BUFSIZE, 4)
 };
 #else
 #define CONFIG_TOTAL_LEN  (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN)
