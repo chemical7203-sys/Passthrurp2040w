@@ -1,345 +1,65 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
-#include "hardware/timer.h"
 #include "hardware/gpio.h"
-#include "hardware/uart.h"
-#include "hardware/irq.h"
-#include <string.h>
 
-// UART defines
-#define UART_ID uart1
-#define BAUD_RATE 115200
-#define UART_TX_PIN 4
-#define UART_RX_PIN 5
-
-// CC1101 SPI defines
 #define SPI_PORT spi0
 #define SPI_MISO_PIN 16
 #define SPI_MOSI_PIN 19
 #define SPI_SCLK_PIN 18
 #define SPI_CSN_PIN 17
 
-// CC1101 GDO pin
-#define GDO0_PIN 20
+#define CC1101_PARTNUM 0x30
+#define READ_SINGLE    0x80
 
-// Signal capture settings
-#define MAX_PULSES 250
-#define END_OF_TRANSMISSION_US 5000
-
-// Global variables for signal capture
-volatile uint32_t pulse_timings[MAX_PULSES];
-volatile uint16_t pulse_count = 0;
-volatile bool capture_done = false;
-absolute_time_t last_edge_time;
-
-// Global variables for storing a signal to transmit
-uint32_t stored_pulse_timings[MAX_PULSES];
-uint16_t stored_pulse_count = 0;
-
-// State machine for device operation
-typedef enum {
-    STATE_IDLE,
-    STATE_ARMED_TO_CAPTURE,
-} DeviceState;
-DeviceState current_state = STATE_IDLE;
-
-// CC1101 Register Definitions
-#define CC1101_IOCFG0       0x02
-#define CC1101_FIFOTHR      0x03
-#define CC1101_PKTLEN       0x06
-#define CC1101_PKTCTRL0     0x07
-#define CC1101_ADDR         0x09
-#define CC1101_CHANNR       0x0A
-#define CC1101_FSCTRL1      0x0B
-#define CC1101_FREQ2        0x0D
-#define CC1101_FREQ1        0x0E
-#define CC1101_FREQ0        0x0F
-#define CC1101_MDMCFG4      0x10
-#define CC1101_MDMCFG3      0x11
-#define CC1101_MDMCFG2      0x12
-#define CC1101_MDMCFG1      0x13
-#define CC1101_MDMCFG0      0x14
-#define CC1101_DEVIATN      0x15
-#define CC1101_MCSM1        0x17
-#define CC1101_MCSM0        0x18
-#define CC1101_FOCCFG       0x19
-#define CC1101_AGCCTRL2     0x1B
-#define CC1101_WORCTRL      0x1E
-#define CC1101_FSCAL3       0x23
-#define CC1101_FSCAL2       0x24
-#define CC1101_FSCAL1       0x25
-#define CC1101_FSCAL0       0x26
-#define CC1101_TEST2        0x2C
-#define CC1101_TEST1        0x2D
-#define CC1101_TEST0        0x2E
-#define CC1101_PATABLE      0x3E
-#define CC1101_TXFIFO       0x3F
-#define CC1101_RXFIFO       0x3F
-
-// Status Registers
-#define CC1101_PARTNUM      0x30
-#define CC1101_VERSION      0x31
-#define CC1101_MARCSTATE    0x35
-
-// Strobe commands
-#define CC1101_SRES         0x30
-#define CC1101_SRX          0x34
-#define CC1101_STX          0x35
-#define CC1101_SIDLE        0x36
-
-// SPI Read/Write flags
-#define READ_SINGLE         0x80
-#define READ_BURST          0xC0
-
-// Function Prototypes
-void write_register(uint8_t addr, uint8_t value);
-uint8_t read_register(uint8_t addr);
-void cc1101_strobe(uint8_t strobe);
-void reset_cc1101(void);
-void init_cc1101(void);
-void transmit_signal(uint32_t* timings, uint16_t count);
-void verify_cc1101_communication();
-
-// CC1101 configuration registers
-static const uint8_t cc1101_regs_433mhz[] = {
-    CC1101_FSCTRL1, 0x06,
-    CC1101_FREQ2,   0x10,
-    CC1101_FREQ1,   0xB1,
-    CC1101_FREQ0,   0x3B,
-    CC1101_MDMCFG4, 0x8C,
-    CC1101_MDMCFG3, 0x22,
-    CC1101_MDMCFG2, 0x02,
-    CC1101_MDMCFG1, 0x22,
-    CC1101_MDMCFG0, 0xF8,
-    CC1101_CHANNR,  0x00,
-    CC1101_DEVIATN, 0x15,
-    CC1101_FOCCFG,  0x16,
-    CC1101_AGCCTRL2,0x43,
-    CC1101_WORCTRL, 0xFB,
-    CC1101_FSCAL3,  0xE9,
-    CC1101_FSCAL2,  0x2A,
-    CC1101_FSCAL1,  0x00,
-    CC1101_FSCAL0,  0x1F,
-    CC1101_TEST2,   0x81,
-    CC1101_TEST1,   0x35,
-    CC1101_TEST0,   0x09,
-    CC1101_PKTCTRL0,0x00,
-    CC1101_ADDR,    0x00,
-    CC1101_PKTLEN,  0x3D,
-    CC1101_IOCFG0,  0x07, // Carrier Sense
-    CC1101_MCSM1,   0x0C,
-    CC1101_MCSM0,   0x18,
-    0xFF, 0xFF
-};
-
-// SPI Functions
-void write_register(uint8_t addr, uint8_t value) {
-    gpio_put(SPI_CSN_PIN, 0);
-    spi_write_blocking(SPI_PORT, &addr, 1);
-    spi_write_blocking(SPI_PORT, &value, 1);
-    gpio_put(SPI_CSN_PIN, 1);
-}
-
-uint8_t read_register(uint8_t addr) {
-    uint8_t value;
-    addr |= READ_SINGLE;
-    gpio_put(SPI_CSN_PIN, 0);
-    spi_write_blocking(SPI_PORT, &addr, 1);
-    spi_read_blocking(SPI_PORT, 0, &value, 1);
-    gpio_put(SPI_CSN_PIN, 1);
-    return value;
-}
-
-void cc1101_strobe(uint8_t strobe) {
-    gpio_put(SPI_CSN_PIN, 0);
-    spi_write_blocking(SPI_PORT, &strobe, 1);
-    gpio_put(SPI_CSN_PIN, 1);
-}
-
-// CC1101 Control Functions
-void reset_cc1101(void) {
-    gpio_put(SPI_CSN_PIN, 0);
-    sleep_us(10);
-    gpio_put(SPI_CSN_PIN, 1);
-    sleep_us(40);
-    cc1101_strobe(CC1101_SRES);
-    sleep_ms(1);
-}
-
-void init_cc1101(void) {
-    reset_cc1101();
-    for (int i = 0; cc1101_regs_433mhz[i] != 0xFF; i += 2) {
-        write_register(cc1101_regs_433mhz[i], cc1101_regs_433mhz[i+1]);
-    }
-}
-
-// Interrupt and Signal Handling
-void gpio_callback(uint gpio, uint32_t events) {
-    if (capture_done) return;
-    absolute_time_t now = get_absolute_time();
-    uint32_t duration_us = absolute_time_diff_us(last_edge_time, now);
-    last_edge_time = now;
-    if (duration_us > END_OF_TRANSMISSION_US) {
-        pulse_count = 0;
-        return;
-    }
-    if (pulse_count < MAX_PULSES) {
-        pulse_timings[pulse_count++] = duration_us;
-    } else {
-        pulse_count = 0;
-    }
-}
-
-// UART and Transmit Functions
-void setup_uart() {
-    uart_init(UART_ID, BAUD_RATE);
-    gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
-    gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
-    uart_puts(UART_ID, "\n\nRP2040 CC1101 Cloner\n");
-}
-
-void transmit_signal(uint32_t* timings, uint16_t count) {
-    if (count == 0) {
-        uart_puts(UART_ID, "STATUS:No signal stored to transmit\n");
-        return;
-    }
-    uart_puts(UART_ID, "STATUS:Transmitting...\n");
-    cc1101_strobe(CC1101_SIDLE);
-    write_register(CC1101_PATABLE, 0xC0);
-    gpio_init(GDO0_PIN);
-    gpio_set_dir(GDO0_PIN, GPIO_OUT);
-    cc1101_strobe(CC1101_STX);
-    sleep_ms(1);
-    bool level = true;
-    for (int i = 0; i < count; i++) {
-        gpio_put(GDO0_PIN, level);
-        busy_wait_us_32(timings[i]);
-        level = !level;
-    }
-    gpio_put(GDO0_PIN, 0);
-    cc1101_strobe(CC1101_SIDLE);
-    gpio_init(GDO0_PIN);
-    gpio_set_dir(GDO0_PIN, GPIO_IN);
-    gpio_pull_down(GDO0_PIN);
-    cc1101_strobe(CC1101_SRX);
-    uart_puts(UART_ID, "STATUS:Transmit complete\n");
-}
-
-void verify_cc1101_communication() {
-    char buf[128];
-    uart_puts(UART_ID, "\n--- CC1101 Communication Verification ---\n");
-    // 1. SPI R/W Test
-    uint8_t test_val = 0xAB;
-    uint8_t original_val = read_register(CC1101_DEVIATN);
-    write_register(CC1101_DEVIATN, test_val);
-    uint8_t read_val = read_register(CC1101_DEVIATN);
-    sprintf(buf, "SPI R/W Test: Wrote 0x%02X, Read 0x%02X. ", test_val, read_val);
-    uart_puts(UART_ID, buf);
-    if (test_val == read_val) {
-        uart_puts(UART_ID, "Result: SUCCESS\n");
-    } else {
-        uart_puts(UART_ID, "Result: FAILED. Check wiring.\n");
-    }
-    write_register(CC1101_DEVIATN, original_val);
-    // 2. Chip ID Test
-    uint8_t partnum = read_register(CC1101_PARTNUM);
-    uint8_t version = read_register(CC1101_VERSION);
-    sprintf(buf, "Chip ID Test: PARTNUM=0x%02X, VERSION=0x%02X. ", partnum, version);
-    uart_puts(UART_ID, buf);
-    if (partnum == 0x00 && version == 0x14) {
-        uart_puts(UART_ID, "Result: SUCCESS (Genuine CC1101)\n");
-    } else {
-        uart_puts(UART_ID, "Result: FAILED. Unexpected values.\n");
-    }
-    // 3. MARCSTATE Test
-    cc1101_strobe(CC1101_SIDLE);
-    cc1101_strobe(CC1101_SRX);
-    sleep_ms(1);
-    uint8_t marcstate = read_register(CC1101_MARCSTATE);
-    sprintf(buf, "MARCSTATE Test: After SRX, state is 0x%02X. ", marcstate);
-    uart_puts(UART_ID, buf);
-    if ((marcstate & 0x1F) == 0x0D) {
-        uart_puts(UART_ID, "Result: SUCCESS (Correctly in RX Mode)\n");
-    } else {
-        uart_puts(UART_ID, "Result: FAILED (Expected ~0x0D)\n");
-    }
-    cc1101_strobe(CC1101_SIDLE);
-    uart_puts(UART_ID, "--- Verification Complete ---\n\n");
-}
-
-// Main Function
 int main() {
     stdio_init_all();
-    setup_uart();
-    uart_puts(UART_ID, "Firmware starting...\n");
+    sleep_ms(2500); // Wait for user to connect serial monitor
 
-    // SPI initialisation
-    spi_init(SPI_PORT, 4 * 1000 * 1000);
+    printf("--- Barebones CC1101 SPI Test ---\n");
+    printf("This test will attempt to read the PARTNUM register from the CC1101.\n");
+    printf("Please ensure you are viewing this message over the PICO'S USB VIRTUAL COM PORT.\n\n");
+
+    spi_init(SPI_PORT, 1000 * 1000); // Use a safe, slow 1MHz speed
     gpio_set_function(SPI_MISO_PIN, GPIO_FUNC_SPI);
     gpio_set_function(SPI_SCLK_PIN, GPIO_FUNC_SPI);
     gpio_set_function(SPI_MOSI_PIN, GPIO_FUNC_SPI);
+
     gpio_init(SPI_CSN_PIN);
     gpio_set_dir(SPI_CSN_PIN, GPIO_OUT);
     gpio_put(SPI_CSN_PIN, 1);
 
-    // Initialize CC1101
-    init_cc1101();
+    printf("SPI Initialized on port spi0.\n");
+    printf("Pins: MISO=%d, MOSI=%d, SCLK=%d, CSN=%d\n\n", SPI_MISO_PIN, SPI_MOSI_PIN, SPI_SCLK_PIN, SPI_CSN_PIN);
 
-    // === VERIFICATION STEP ===
-    verify_cc1101_communication();
+    uint8_t addr = CC1101_PARTNUM | READ_SINGLE;
+    uint8_t partnum_val;
 
-    // Re-enter RX mode after verification
-    cc1101_strobe(CC1101_SRX);
-    
-    // GDO0 pin setup
-    gpio_pull_down(GDO0_PIN);
-    gpio_set_irq_enabled_with_callback(GDO0_PIN, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, false, &gpio_callback);
+    // Manually control CSN for clarity
+    gpio_put(SPI_CSN_PIN, 0);
+    sleep_us(10);
+    spi_write_blocking(SPI_PORT, &addr, 1);
+    spi_read_blocking(SPI_PORT, 0, &partnum_val, 1);
+    sleep_us(10);
+    gpio_put(SPI_CSN_PIN, 1);
 
-    uart_puts(UART_ID, "STATUS:Ready\n");
+    printf("Attempted to read PARTNUM register (command byte 0xB0).\n");
+    printf("Value received from MISO: 0x%02X\n\n", partnum_val);
 
-    while (true) {
-        if (uart_is_readable(UART_ID)) {
-            char cmd = uart_getc(UART_ID);
-            if (cmd == 'c' && current_state == STATE_IDLE) {
-                current_state = STATE_ARMED_TO_CAPTURE;
-                pulse_count = 0;
-                capture_done = false;
-                last_edge_time = get_absolute_time();
-                gpio_set_irq_enabled(GDO0_PIN, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true);
-                uart_puts(UART_ID, "STATUS:Armed\n");
-            } else if (cmd == 't' && current_state == STATE_IDLE) {
-                transmit_signal(stored_pulse_timings, stored_pulse_count);
-                uart_puts(UART_ID, "STATUS:Ready\n");
-            }
-        }
-        if (current_state == STATE_ARMED_TO_CAPTURE) {
-            if (!capture_done && pulse_count > 0 && absolute_time_diff_us(last_edge_time, get_absolute_time()) > END_OF_TRANSMISSION_US) {
-                if (pulse_count > 10) {
-                    capture_done = true;
-                } else {
-                    pulse_count = 0;
-                }
-            }
-            if (capture_done) {
-                gpio_set_irq_enabled(GDO0_PIN, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, false);
-                memcpy(stored_pulse_timings, (void*)pulse_timings, pulse_count * sizeof(uint32_t));
-                stored_pulse_count = pulse_count;
-                uart_puts(UART_ID, "DATA:");
-                char uart_buf_data[16];
-                for (int i = 0; i < pulse_count; i++) {
-                    sprintf(uart_buf_data, "%lu", stored_pulse_timings[i]);
-                    uart_puts(UART_ID, uart_buf_data);
-                    if (i < pulse_count - 1) {
-                        uart_puts(UART_ID, ",");
-                    }
-                }
-                uart_puts(UART_ID, "\n");
-                current_state = STATE_IDLE;
-                uart_puts(UART_ID, "STATUS:Ready\n");
-            }
-        }
-        sleep_ms(1);
+    if (partnum_val == 0x00) {
+        printf("Result: SUCCESS!\n");
+        printf("The CC1101 PARTNUM is 0x00 as expected. Communication is working.\n");
+    } else {
+        printf("Result: FAILED.\n");
+        printf("Expected 0x00, but got 0x%02X.\n", partnum_val);
+        printf("This confirms a problem with the SPI communication. Please double-check wiring, especially the MISO pin.\n");
     }
+
+    printf("\nTest complete. The device will now do nothing.\n");
+
+    while(1) {
+        tight_loop_contents();
+    }
+
     return 0;
 }
