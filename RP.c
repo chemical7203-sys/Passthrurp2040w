@@ -79,6 +79,11 @@ DeviceState current_state = STATE_IDLE;
 #define CC1101_TXFIFO       0x3F    // TX FIFO address
 #define CC1101_RXFIFO       0x3F    // RX FIFO address
 
+// Status Registers
+#define CC1101_PARTNUM      0x30    // Part number
+#define CC1101_VERSION      0x31    // Version number
+#define CC1101_MARCSTATE    0x35    // Main Radio Control State Machine state
+
 // Strobe commands
 #define CC1101_SRES         0x30    // Reset chip.
 #define CC1101_SFSTXON      0x31    // Enable and calibrate frequency synthesizer (if MCSM0.FS_AUTOCAL=1).
@@ -101,6 +106,9 @@ void cc1101_strobe(uint8_t strobe);
 void reset_cc1101(void);
 void init_cc1101(void);
 void read_burst_register(uint8_t addr, uint8_t *buffer, uint8_t count);
+void transmit_signal(uint32_t* timings, uint16_t count);
+void verify_cc1101_communication();
+
 
 // CC1101 configuration registers for 433MHz OOK/ASK
 static const uint8_t cc1101_regs_433mhz[] = {
@@ -187,8 +195,6 @@ void init_cc1101(void) {
     }
 }
 
-void transmit_signal(uint32_t* timings, uint16_t count);
-
 
 void gpio_callback(uint gpio, uint32_t events) {
     // This check prevents the ISR from running while the main loop is processing data
@@ -229,6 +235,52 @@ void setup_uart() {
     uart_puts(UART_ID, "\n\nRP2040 CC1101 Cloner\n");
 }
 
+void verify_cc1101_communication() {
+    char buf[128];
+    uart_puts(UART_ID, "\n--- CC1101 Communication Verification ---\n");
+
+    // 1. SPI R/W Test
+    uint8_t test_val = 0xAB;
+    uint8_t original_val = read_register(CC1101_DEVIATN); // Use a harmless register
+    write_register(CC1101_DEVIATN, test_val);
+    uint8_t read_val = read_register(CC1101_DEVIATN);
+    sprintf(buf, "SPI R/W Test: Wrote 0x%02X to DEVIATN, Read 0x%02X. ", test_val, read_val);
+    uart_puts(UART_ID, buf);
+    if (test_val == read_val) {
+        uart_puts(UART_ID, "Result: SUCCESS\n");
+    } else {
+        uart_puts(UART_ID, "Result: FAILED. Check wiring (MOSI, MISO, SCLK, CSN).\n");
+    }
+    write_register(CC1101_DEVIATN, original_val); // Restore original value
+
+    // 2. Chip ID Test
+    uint8_t partnum = read_register(CC1101_PARTNUM);
+    uint8_t version = read_register(CC1101_VERSION);
+    sprintf(buf, "Chip ID Test: PARTNUM=0x%02X, VERSION=0x%02X. ", partnum, version);
+    uart_puts(UART_ID, buf);
+    if (partnum == 0x00 && version == 0x14) {
+        uart_puts(UART_ID, "Result: SUCCESS (Genuine CC1101)\n");
+    } else {
+        uart_puts(UART_ID, "Result: FAILED. Unexpected values. Check wiring.\n");
+    }
+
+    // 3. MARCSTATE Test
+    cc1101_strobe(CC1101_SIDLE); // Go to IDLE
+    cc1101_strobe(CC1101_SRX);   // Command RX mode
+    sleep_ms(1);                 // Give it a moment to switch
+    uint8_t marcstate = read_register(CC1101_MARCSTATE);
+    sprintf(buf, "MARCSTATE Test: After SRX, state is 0x%02X. ", marcstate);
+    uart_puts(UART_ID, buf);
+    if ((marcstate & 0x1F) == 0x0D) { // Mask out top bits, check for RX state
+        uart_puts(UART_ID, "Result: SUCCESS (Correctly in RX Mode)\n");
+    } else {
+        uart_puts(UART_ID, "Result: FAILED (Expected ~0x0D for RX Mode)\n");
+    }
+
+    cc1101_strobe(CC1101_SIDLE); // Return to idle for safety
+    uart_puts(UART_ID, "--- Verification Complete ---\n\n");
+}
+
 void transmit_signal(uint32_t* timings, uint16_t count) {
     if (count == 0) {
         uart_puts(UART_ID, "STATUS:No signal stored to transmit\n");
@@ -244,7 +296,7 @@ void transmit_signal(uint32_t* timings, uint16_t count) {
     // Configure GDO0 as an output on the Pico
     gpio_init(GDO0_PIN);
     gpio_set_dir(GDO0_PIN, GPIO_OUT);
-    
+
     // Enter TX mode
     cc1101_strobe(CC1101_STX);
     sleep_ms(1); // Wait for oscillator to stabilize
@@ -290,8 +342,13 @@ int main()
     
     printf("CC1101 Cloner Initializing...\n");
 
-    // Initialize CC1101 and enter RX mode
+    // Initialize CC1101
     init_cc1101();
+
+    // === VERIFICATION STEP ===
+    verify_cc1101_communication();
+
+    // Re-enter RX mode after verification
     cc1101_strobe(CC1101_SRX);
     
     // GDO0 pin setup
