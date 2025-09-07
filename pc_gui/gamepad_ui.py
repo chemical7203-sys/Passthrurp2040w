@@ -100,8 +100,8 @@ class GamepadUI(QWidget):
         group_label = QLabel("Device Selection"); group_label.setFont(QFont('Arial', 12, QFont.Weight.Bold)); main_layout.addWidget(group_label)
         gamepad_layout = QHBoxLayout(); self.gamepad_select = QComboBox(); self.gamepad_refresh_btn = QPushButton("Refresh"); gamepad_layout.addWidget(QLabel("Gamepad:")); gamepad_layout.addWidget(self.gamepad_select, 1); gamepad_layout.addWidget(self.gamepad_refresh_btn); main_layout.addLayout(gamepad_layout)
         serial_layout = QHBoxLayout(); self.serial_select = QComboBox(); self.serial_refresh_btn = QPushButton("Refresh"); self.serial_connect_btn = QPushButton("Connect"); serial_layout.addWidget(QLabel("Serial Port:")); serial_layout.addWidget(self.serial_select, 1); serial_layout.addWidget(self.serial_refresh_btn); serial_layout.addWidget(self.serial_connect_btn); main_layout.addLayout(serial_layout)
-        main_layout.addWidget(QLabel("Raw Pygame Event Monitor:")); self.event_monitor = QTextEdit(); self.event_monitor.setReadOnly(True); self.event_monitor.setFixedHeight(100); main_layout.addWidget(self.event_monitor)
-        main_layout.addWidget(QLabel("UART RX Monitor (from RP2040):")); self.uart_rx_monitor = QTextEdit(); self.uart_rx_monitor.setReadOnly(True); self.uart_rx_monitor.setFixedHeight(100); main_layout.addWidget(self.uart_rx_monitor)
+        main_layout.addWidget(QLabel("Raw Pygame Event Monitor:")); self.event_monitor = QTextEdit(); self.event_monitor.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse); self.event_monitor.setFixedHeight(100); main_layout.addWidget(self.event_monitor)
+        main_layout.addWidget(QLabel("UART RX Monitor (from RP2040):")); self.uart_rx_monitor = QTextEdit(); self.uart_rx_monitor.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse); self.uart_rx_monitor.setFixedHeight(100); main_layout.addWidget(self.uart_rx_monitor)
     def log_raw_event(self, event_string):
         self.event_monitor.append(event_string); self.event_monitor.verticalScrollBar().setValue(self.event_monitor.verticalScrollBar().maximum())
     def log_uart_rx(self, data_string):
