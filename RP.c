@@ -219,31 +219,17 @@ void hid_task(void) {
 }
 
 void debug_task() {
+    // Minimal debug task for production
     static uint32_t start_ms = 0;
-    const uint32_t interval_ms = 100;
+    const uint32_t interval_ms = 500; // Reduce frequency
     if (board_millis() - start_ms < interval_ms) {
         return;
     }
     start_ms += interval_ms;
 
-    char buf[512];
-    int offset = 0;
-
-    // Line 1: Source data from UART
-    offset += sprintf(buf + offset, "SRC: btns=%04x, lx=%d, ly=%d, rx=%d, ry=%d, dpad=%02x, ax=%d, gx=%d\r\n",
-            gamepad_data.buttons, gamepad_data.lx, gamepad_data.ly,
-            gamepad_data.rx, gamepad_data.ry, gamepad_data.dpad,
-            gamepad_data.accel_x, gamepad_data.gyro_x);
-
-    // Line 2: Destination data (raw HID report)
-    offset += sprintf(buf + offset, "DST: ");
-    uint8_t* report_bytes = (uint8_t*)&last_sent_report;
-    for (int i = 0; i < sizeof(hid_ds4_report_t); i++) {
-        offset += sprintf(buf + offset, "%02x ", report_bytes[i]);
-    }
-    sprintf(buf + offset, "\r\n");
-
-    uart_puts(UART_ID, buf);
+    // char buf[16];
+    // sprintf(buf, "ready=%d\r\n", tud_hid_ready());
+    // uart_puts(UART_ID, buf);
 }
 
 int main() {
