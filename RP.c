@@ -29,6 +29,7 @@ typedef struct __attribute__((packed)) {
 
 static gamepad_data_v2_t gamepad_data;
 static uint8_t report_counter = 0;
+static hid_ds4_report_t last_sent_report; // For debugging raw report bytes
 
 #define UART_ID uart1
 #define BAUD_RATE 115200
@@ -203,6 +204,7 @@ void hid_task(void) {
       report.touchpad.p1.unpressed = 1;
       report.touchpad.p2.unpressed = 1;
 
+      memcpy(&last_sent_report, &report, sizeof(hid_ds4_report_t));
       tud_hid_report(0, &report, sizeof(report));
     #else // GENERIC
       hid_gamepad_report_t report = {0};
@@ -228,11 +230,13 @@ void debug_task() {
     start_ms += interval_ms;
 
     char buf[256];
-    sprintf(buf, "RX: btns=%04x, lx=%d, ly=%d, dpad=%02x | AX=%d, GX=%d | ready=%d\r\n",
-            gamepad_data.buttons, gamepad_data.lx, gamepad_data.ly,
-            gamepad_data.dpad,
-            gamepad_data.accel_x, gamepad_data.gyro_x,
-            tud_hid_ready());
+    uint8_t* report_bytes = (uint8_t*)&last_sent_report;
+    int offset = 0;
+    offset += sprintf(buf + offset, "HID REPORT: ");
+    for (int i = 0; i < sizeof(hid_ds4_report_t); i++) {
+        offset += sprintf(buf + offset, "%02x ", report_bytes[i]);
+    }
+    sprintf(buf + offset, "\r\n");
     uart_puts(UART_ID, buf);
 }
 
