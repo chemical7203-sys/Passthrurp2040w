@@ -98,6 +98,7 @@ class ProControllerHandler(threading.Thread):
                 try:
                     self.device = hid.device()
                     self.device.open(PRO_CONTROLLER_VID, PRO_CONTROLLER_PID)
+                    self.device.set_nonblocking(1)
                     print("DEBUG: Pro Controller found and opened.")
                     self._initialize_controller()
                 except Exception as e:
@@ -108,12 +109,17 @@ class ProControllerHandler(threading.Thread):
 
             try:
                 # Read with a timeout so we can check the running flag
-                report = self.device.read(64, timeout=100)
+                report = self.device.read(64)
                 if report:
                     self._parse_input_report(report)
-            except hid.HIDException as e:
-                print(f"ERROR: HIDException: {e}. Disconnecting controller.")
-                self.device.close()
+            except Exception as e:
+                # Catching a broad exception as the specific hid.error might not
+                # cover all cases like device unplug.
+                print(f"ERROR: HID read failed: {e}. Disconnecting controller.")
+                try:
+                    self.device.close()
+                except:
+                    pass # Device may already be gone
                 self.device = None
                 self.signals.gamepad_disconnected.emit()
             except Exception as e:
