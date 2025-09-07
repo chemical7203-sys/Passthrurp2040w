@@ -12,6 +12,7 @@ class GamepadSignals(QObject):
     stick_event = pyqtSignal(str, float)
     trigger_event = pyqtSignal(str, float)
     button_event = pyqtSignal(str, bool)
+    imu_event = pyqtSignal(int, int, int, int, int, int) # ax, ay, az, gx, gy, gz
     gamepad_disconnected = pyqtSignal()
     device_changed = pyqtSignal()
     gamepad_list_updated = pyqtSignal(list)
