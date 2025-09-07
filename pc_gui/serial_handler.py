@@ -100,7 +100,7 @@ class SerialHandler:
 
         # 1. Construct the 23-byte padded payload
         # Format: < (little-endian), B (dummy), H (buttons), 4b (sticks), B(l2), B(r2), B(dpad), 6h (motion), B (dummy)
-        payload = struct.pack('<BH4bBB6hB',
+        payload = struct.pack('<BH4bBBB6hB',
             dummy_start, buttons, lx, ly, rx, ry, l2, r2, dpad,
             accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z,
             dummy_end
