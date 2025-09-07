@@ -1,4 +1,3 @@
 PyQt6
 pygame
 pyserial
-hidapi
