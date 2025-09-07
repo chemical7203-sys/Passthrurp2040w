@@ -59,10 +59,10 @@ void process_uart() {
                 for (int i = 0; i < 24; i++) {
                     cs ^= pb[i];
                 }
-                if (cs == pb[24]) {
+                // if (cs == pb[24]) { // Temporarily disable checksum for debugging
                     // Copy the 23-byte payload into the padded struct
                     memcpy(&gamepad_data, &pb[1], sizeof(gamepad_data));
-                }
+                // }
                 idx = 0;
             }
         }
@@ -123,7 +123,7 @@ uint8_t dpad_to_generic_hat(uint8_t dpad_mask) {
 #endif
 
 void hid_task(void) {
-  const uint32_t interval_ms = 5;
+  const uint32_t interval_ms = 16;
   static uint32_t start_ms = 0;
   if ( board_millis() - start_ms < interval_ms) return;
   start_ms += interval_ms;
