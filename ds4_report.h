@@ -97,6 +97,7 @@ typedef struct __attribute__((packed)) {
     uint8_t touch_event;
     uint8_t unknown4;
     TouchpadData touchpad;
+    uint8_t padding[20]; // Pad to 64 bytes for a standard DS4 report
 } hid_ds4_report_t;
 
 
