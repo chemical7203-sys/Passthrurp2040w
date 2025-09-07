@@ -189,6 +189,7 @@ void hid_task(void) {
       if (gamepad_data.buttons & (1 << 13)) report.tpad = 1;
 
       report.report_counter = report_counter++;
+      report.timestamp = (uint16_t)board_millis(); // Use system uptime as a simple timestamp
 
       // Gyro and accelerometer data from UART
       report.accel_x = gamepad_data.accel_x;
