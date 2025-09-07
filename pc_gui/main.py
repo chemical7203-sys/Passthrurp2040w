@@ -71,9 +71,9 @@ class MainApplication:
 
     def refresh_serial_ports(self):
         # This function does not interact with Pygame, so it's safe.
-        from device_manager import get_available_serial_ports
+        from serial.tools import list_ports
         self.ui.serial_select.clear()
-        ports = get_available_serial_ports()
+        ports = list_ports.comports()
         self.ui.serial_select.addItem("Select a port...", None)
         for port in ports: self.ui.serial_select.addItem(f"{port.device}", port.device)
 
