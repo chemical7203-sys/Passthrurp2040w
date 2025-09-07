@@ -129,10 +129,21 @@ class DS4Handler(threading.Thread):
     def _process_game_event(self, event):
         self.signals.raw_event.emit(str(event))
         if event.type == pygame.JOYAXISMOTION:
-            axis_map = {0: 'ABS_X', 1: 'ABS_Y', 2: 'ABS_RX', 3: 'ABS_RY', 4: 'ABS_Z', 5: 'ABS_RZ'}
+            # Axis mapping for DS4 controller
+            # 0,1: Left Stick | 2,3: Right Stick | 4: L2 Trigger | 5: R2 Trigger
+            # 6,7,8: Accel X,Y,Z | 9,10,11: Gyro X,Y,Z
+            axis_map = {
+                0: 'ABS_X', 1: 'ABS_Y', 2: 'ABS_RX', 3: 'ABS_RY',
+                4: 'ABS_Z', 5: 'ABS_RZ',
+                6: 'ABS_HAT0X', 7: 'ABS_HAT0Y', 8: 'ABS_HAT0Z', # Accel
+                9: 'ABS_HAT1X', 10: 'ABS_HAT1Y', 11: 'ABS_HAT1Z'  # Gyro
+            }
             if event.axis in axis_map:
-                if event.axis in [4, 5]: self.signals.trigger_event.emit(axis_map[event.axis], event.value)
-                else: self.signals.stick_event.emit(axis_map[event.axis], event.value)
+                # Separate triggers from other axes
+                if event.axis in [4, 5]:
+                    self.signals.trigger_event.emit(axis_map[event.axis], event.value)
+                else:
+                    self.signals.stick_event.emit(axis_map[event.axis], event.value)
         elif event.type == pygame.JOYBUTTONDOWN or event.type == pygame.JOYBUTTONUP:
             pressed = (event.type == pygame.JOYBUTTONDOWN)
             button_map = {

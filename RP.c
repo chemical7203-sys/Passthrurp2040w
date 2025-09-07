@@ -22,6 +22,8 @@ typedef struct __attribute__((packed)) {
     int8_t   lx, ly, rx, ry;
     uint8_t  l2, r2;
     uint8_t  dpad;
+    int16_t  accel_x, accel_y, accel_z;
+    int16_t  gyro_x, gyro_y, gyro_z;
     uint8_t  dummy_end;
 } gamepad_data_v2_t;
 
@@ -39,8 +41,8 @@ void setup_uart() {
     gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
 }
 void process_uart() {
-    // Expecting a 13-byte packet: 1 header + 11 payload + 1 checksum
-    static uint8_t pb[13];
+    // Expecting a 25-byte packet: 1 header + 23 payload + 1 checksum
+    static uint8_t pb[25];
     static uint8_t idx = 0;
     while (uart_is_readable(UART_ID)) {
         uint8_t ch = uart_getc(UART_ID);
@@ -50,14 +52,14 @@ void process_uart() {
             }
         } else {
             pb[idx++] = ch;
-            if (idx >= 13) {
+            if (idx >= 25) {
                 uint8_t cs = 0;
-                // Checksum is now over the header and the 11-byte payload
-                for (int i = 0; i < 12; i++) {
+                // Checksum is now over the header and the 23-byte payload
+                for (int i = 0; i < 24; i++) {
                     cs ^= pb[i];
                 }
-                if (cs == pb[12]) {
-                    // Copy the 11-byte payload into the padded struct
+                if (cs == pb[24]) {
+                    // Copy the 23-byte payload into the padded struct
                     memcpy(&gamepad_data, &pb[1], sizeof(gamepad_data));
                 }
                 idx = 0;
@@ -186,13 +188,13 @@ void hid_task(void) {
 
       report.report_counter = report_counter++;
 
-      // Gyro and accelerometer data - set to zero as not provided by UART
-      report.accel_x = 0;
-      report.accel_y = 0;
-      report.accel_z = 0;
-      report.gyro_x = 0;
-      report.gyro_y = 0;
-      report.gyro_z = 0;
+      // Gyro and accelerometer data from UART
+      report.accel_x = gamepad_data.accel_x;
+      report.accel_y = gamepad_data.accel_y;
+      report.accel_z = gamepad_data.accel_z;
+      report.gyro_x = gamepad_data.gyro_x;
+      report.gyro_y = gamepad_data.gyro_y;
+      report.gyro_z = gamepad_data.gyro_z;
 
       // Touchpad data - set to not touched
       report.touchpad.p1.unpressed = 1;

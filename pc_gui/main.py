@@ -19,6 +19,7 @@ class MainApplication:
 
         self.serial_state = {
             'buttons': 0, 'dpad': 0, 'lx': 0, 'ly': 0, 'rx': 0, 'ry': 0, 'l2': 0, 'r2': 0,
+            'accel_x': 0, 'accel_y': 0, 'accel_z': 0, 'gyro_x': 0, 'gyro_y': 0, 'gyro_z': 0,
         }
         self.button_map = {
             'BTN_SOUTH': ('buttons', 1<<0), 'BTN_EAST': ('buttons', 1<<1),
@@ -131,6 +132,13 @@ class MainApplication:
             state_key, bit = self.button_map[code]
             if value: self.serial_state[state_key] |= bit
             else: self.serial_state[state_key] &= ~bit
+        # Gyro / Accelerometer
+        elif code == 'ABS_HAT0X': self.serial_state['accel_x'] = int(value * 32767)
+        elif code == 'ABS_HAT0Y': self.serial_state['accel_y'] = int(value * 32767)
+        elif code == 'ABS_HAT0Z': self.serial_state['accel_z'] = int(value * 32767)
+        elif code == 'ABS_HAT1X': self.serial_state['gyro_x'] = int(value * 32767)
+        elif code == 'ABS_HAT1Y': self.serial_state['gyro_y'] = int(value * 32767)
+        elif code == 'ABS_HAT1Z': self.serial_state['gyro_z'] = int(value * 32767)
 
     def send_latest_serial_state(self):
         if self.serial_handler.ser and self.serial_handler.ser.is_open:
