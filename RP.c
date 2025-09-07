@@ -145,7 +145,7 @@ static const uint8_t cc1101_regs_433mhz[] = {
 
 void write_register(uint8_t addr, uint8_t value) {
     gpio_put(SPI_CSN_PIN, 0);
-    while(gpio_get(SPI_MISO_PIN)); // Wait for MISO to go low
+    // while(gpio_get(SPI_MISO_PIN)); // Removed to prevent firmware hanging on unresponsive chip
     spi_write_blocking(SPI_PORT, &addr, 1);
     spi_write_blocking(SPI_PORT, &value, 1);
     gpio_put(SPI_CSN_PIN, 1);
@@ -155,7 +155,7 @@ uint8_t read_register(uint8_t addr) {
     uint8_t value;
     addr |= READ_SINGLE;
     gpio_put(SPI_CSN_PIN, 0);
-    while(gpio_get(SPI_MISO_PIN)); // Wait for MISO to go low
+    // while(gpio_get(SPI_MISO_PIN)); // Removed to prevent firmware hanging on unresponsive chip
     spi_write_blocking(SPI_PORT, &addr, 1);
     spi_read_blocking(SPI_PORT, 0, &value, 1);
     gpio_put(SPI_CSN_PIN, 1);
@@ -165,7 +165,7 @@ uint8_t read_register(uint8_t addr) {
 void read_burst_register(uint8_t addr, uint8_t *buffer, uint8_t count) {
     addr |= READ_BURST;
     gpio_put(SPI_CSN_PIN, 0);
-    while(gpio_get(SPI_MISO_PIN));
+    // while(gpio_get(SPI_MISO_PIN)); // Removed to prevent firmware hanging on unresponsive chip
     spi_write_blocking(SPI_PORT, &addr, 1);
     spi_read_blocking(SPI_PORT, 0, buffer, count);
     gpio_put(SPI_CSN_PIN, 1);
@@ -174,7 +174,7 @@ void read_burst_register(uint8_t addr, uint8_t *buffer, uint8_t count) {
 
 void cc1101_strobe(uint8_t strobe) {
     gpio_put(SPI_CSN_PIN, 0);
-    while(gpio_get(SPI_MISO_PIN));
+    // while(gpio_get(SPI_MISO_PIN)); // Removed to prevent firmware hanging on unresponsive chip
     spi_write_blocking(SPI_PORT, &strobe, 1);
     gpio_put(SPI_CSN_PIN, 1);
 }
