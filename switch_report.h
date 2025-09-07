@@ -59,3 +59,14 @@ typedef enum {
     SUBCOMMAND_SET_IMU_SENSITIVITY = 0x41,
     SUBCOMMAND_ENABLE_VIBRATION = 0x48,
 } nintendo_subcommand_t;
+
+// Response to subcommand 0x02
+typedef struct __attribute((packed, aligned(1)))
+{
+    uint16_t fw_version;
+    uint8_t controller_type;
+    uint8_t unknown_1;
+    uint8_t mac_address[6];
+    uint8_t unknown_2;
+    uint8_t unknown_3;
+} pro_controller_device_info_t;

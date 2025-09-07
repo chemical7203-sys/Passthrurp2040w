@@ -97,51 +97,76 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
     return;
   }
 
-  // The first byte of the output report is the report ID.
-  // The second byte is a packet counter.
-  // The third byte is the subcommand.
-  uint8_t subcommand = buffer[1];
-
-  // Prepare a response buffer. The response for a subcommand is an input report with ID 0x21.
-  uint8_t response[64] = {0};
-  response[0] = 0x21; // Report ID for subcommand responses
-  response[1] = buffer[0]; // Echo the packet counter
-
-  // Acknowledge the subcommand
-  response[2] = 0x80; // General ACK
-  response[3] = subcommand;
-
-  char debug_buf[128];
-
-  switch (subcommand) {
-    case SUBCOMMAND_SET_INPUT_REPORT_MODE:
-      pro_controller_state.report_mode = buffer[2];
-      sprintf(debug_buf, "Subcommand: Set Input Report Mode to 0x%02x\r\n", pro_controller_state.report_mode);
-      uart_puts(UART_ID, debug_buf);
-      break;
-
-    case SUBCOMMAND_ENABLE_IMU:
-      pro_controller_state.imu_enabled = (buffer[2] == 0x01);
-      sprintf(debug_buf, "Subcommand: Set IMU Enabled to %d\r\n", pro_controller_state.imu_enabled);
-      uart_puts(UART_ID, debug_buf);
-      break;
-
-    case SUBCOMMAND_REQUEST_DEVICE_INFO:
-        // Respond with device info: Pro Controller, MAC address, etc.
-        // This is a more complex response that we can fill in later if needed.
-        // For now, just ACK.
-        sprintf(debug_buf, "Subcommand: Request Device Info\r\n");
-        uart_puts(UART_ID, debug_buf);
-        break;
-
-    default:
-      sprintf(debug_buf, "Subcommand: unhandled 0x%02x\r\n", subcommand);
-      uart_puts(UART_ID, debug_buf);
-      break;
+  uint8_t subcommand = 0;
+  // The subcommand is at different offsets depending on the report ID
+  if (report_id == 0x01) {
+    subcommand = buffer[1];
+  } else if (report_id == 0x10) {
+    // This is a rumble-only report, no subcommand
+    return;
+  } else if (report_id == 0x11) {
+    subcommand = buffer[10];
+  } else {
+    return; // Unknown report ID
   }
 
-  // Send the ACK response
-  tud_hid_report(0x21, response, sizeof(response));
+  // Prepare a response buffer for a 0x21 input report
+  uint8_t response[49] = {0}; // Max size needed for device info
+  response[0] = 0x21;         // Report ID for subcommand responses
+  response[1] = buffer[0];    // Echo the packet counter
+
+  char debug_buf[128];
+  sprintf(debug_buf, "Host sent Report ID 0x%02x, Subcommand 0x%02x\r\n", report_id, subcommand);
+  uart_puts(UART_ID, debug_buf);
+
+  switch (subcommand) {
+    case SUBCOMMAND_REQUEST_DEVICE_INFO: {
+      response[2] = 0x82; // ACK with data
+      response[3] = 0x02; // Echo subcommand
+      pro_controller_device_info_t* info = (pro_controller_device_info_t*)&response[4];
+      info->fw_version = 0x4803; // Corresponds to FW 3.89
+      info->controller_type = 0x03; // Pro Controller
+      info->unknown_1 = 0x02;
+      // Mock MAC address
+      info->mac_address[0] = 0x01; info->mac_address[1] = 0x02; info->mac_address[2] = 0x03;
+      info->mac_address[3] = 0x04; info->mac_address[4] = 0x05; info->mac_address[5] = 0x06;
+      info->unknown_2 = 0x01;
+      info->unknown_3 = 0x01; // Use SPI colors = yes
+      tud_hid_report(0x21, response, sizeof(pro_controller_device_info_t) + 4);
+      break;
+    }
+
+    case SUBCOMMAND_SET_INPUT_REPORT_MODE: {
+      uint8_t arg_offset = (report_id == 0x11) ? 11 : 2;
+      pro_controller_state.report_mode = buffer[arg_offset];
+      sprintf(debug_buf, "Subcommand: Set Input Report Mode to 0x%02x\r\n", pro_controller_state.report_mode);
+      uart_puts(UART_ID, debug_buf);
+      // Send standard ACK
+      response[2] = 0x80;
+      response[3] = subcommand;
+      tud_hid_report(0x21, response, 4);
+      break;
+    }
+
+    case SUBCOMMAND_ENABLE_IMU: {
+      uint8_t arg_offset = (report_id == 0x11) ? 11 : 2;
+      pro_controller_state.imu_enabled = (buffer[arg_offset] == 0x01);
+      sprintf(debug_buf, "Subcommand: Set IMU Enabled to %d\r\n", pro_controller_state.imu_enabled);
+      uart_puts(UART_ID, debug_buf);
+      // Send standard ACK
+      response[2] = 0x80;
+      response[3] = subcommand;
+      tud_hid_report(0x21, response, 4);
+      break;
+    }
+
+    default:
+      // Send standard ACK for all other subcommands to keep handshake alive
+      response[2] = 0x80;
+      response[3] = subcommand;
+      tud_hid_report(0x21, response, 4);
+      break;
+  }
 }
 
 #if CFG_TUD_HID_NINTENDO
