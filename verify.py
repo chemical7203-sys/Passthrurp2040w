@@ -125,7 +125,7 @@ class App(tk.Tk):
         """Runs in a separate thread to read data from the serial port."""
         while not self.stop_thread and self.serial_port and self.serial_port.is_open:
             try:
-                line = self.serial_port.readline().decode('utf-8').strip()
+                line = self.serial_port.readline().decode('utf-8', errors='replace').strip()
                 if line:
                     self.data_queue.put(line)
             except (serial.SerialException, TypeError):
