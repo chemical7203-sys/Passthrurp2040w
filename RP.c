@@ -228,12 +228,11 @@ void debug_task() {
     start_ms += interval_ms;
 
     char buf[256];
-    sprintf(buf, "RX: btns=%04x, lx=%d, ly=%d, rx=%d, ry=%d, l2=%d, r2=%d, dpad=%02x | AX=%d, AY=%d, AZ=%d, GX=%d, GY=%d, GZ=%d\r\n",
+    sprintf(buf, "RX: btns=%04x, lx=%d, ly=%d, dpad=%02x | AX=%d, GX=%d | ready=%d\r\n",
             gamepad_data.buttons, gamepad_data.lx, gamepad_data.ly,
-            gamepad_data.rx, gamepad_data.ry, gamepad_data.l2,
-            gamepad_data.r2, gamepad_data.dpad,
-            gamepad_data.accel_x, gamepad_data.accel_y, gamepad_data.accel_z,
-            gamepad_data.gyro_x, gamepad_data.gyro_y, gamepad_data.gyro_z);
+            gamepad_data.dpad,
+            gamepad_data.accel_x, gamepad_data.gyro_x,
+            tud_hid_ready());
     uart_puts(UART_ID, buf);
 }
 
