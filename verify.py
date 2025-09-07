@@ -1,127 +1,186 @@
+import tkinter as tk
+from tkinter import ttk, scrolledtext, messagebox
 import serial
-import time
-import sys
+import serial.tools.list_ports
+import threading
+import queue
+import platform
 
-# --- Configuration ---
-# Please change this to your Pico's serial port.
-# Examples:
-# Windows: 'COM3'
-# Linux:   '/dev/ttyACM0'
-# macOS:   '/dev/cu.usbmodem1411'
-SERIAL_PORT = '/dev/ttyACM0'
-BAUD_RATE = 115200
+class App(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Pico CC1101 Cloner Interface")
+        self.geometry("700x500")
 
-def main():
-    """Main function to run the verification interactive prompt."""
-    print(f"--- Raspberry Pi Pico CC1101 Cloner Verification Script ---")
-    print(f"Attempting to connect to Pico on {SERIAL_PORT} at {BAUD_RATE} bps...")
+        self.serial_port = None
+        self.port_thread = None
+        self.stop_thread = False
+        self.data_queue = queue.Queue()
 
-    try:
-        # The timeout is crucial to prevent readline() from blocking indefinitely.
-        pico = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=2)
-    except serial.SerialException as e:
-        print(f"\n[ERROR] Could not open serial port '{SERIAL_PORT}'.")
-        print(f"Details: {e}")
-        print("Please check the following:")
-        print("1. Is the Pico connected to your computer?")
-        print("2. Is the SERIAL_PORT variable in this script set correctly?")
-        print("3. Do you have the necessary permissions to access the port?")
-        sys.exit(1)
+        # --- Top Frame for Connection ---
+        connection_frame = ttk.LabelFrame(self, text="Connection")
+        connection_frame.pack(padx=10, pady=10, fill="x")
 
-    print("Connection successful. Waiting for the device to be ready...")
+        ttk.Label(connection_frame, text="COM Port:").pack(side="left", padx=5, pady=5)
 
-    # Wait for the initial "STATUS:Ready" message from the Pico to ensure sync.
-    if not wait_for_status(pico, "Ready", timeout_seconds=5):
-        print("\n[ERROR] Device did not become ready. Please reset the Pico and try again.")
-        pico.close()
-        sys.exit(1)
+        self.port_var = tk.StringVar()
+        self.port_menu = ttk.Combobox(connection_frame, textvariable=self.port_var, state="readonly", width=40)
+        self.port_menu.pack(side="left", padx=5, pady=5)
 
-    print("\n--- Pico is Ready ---")
+        self.refresh_button = ttk.Button(connection_frame, text="Refresh", command=self.populate_ports)
+        self.refresh_button.pack(side="left", padx=5, pady=5)
 
-    while True:
-        print("\nSelect an action:")
-        print("  [c] Capture a new 433MHz signal")
-        print("  [t] Transmit the last captured signal")
-        print("  [q] Quit")
-        choice = input("Enter your choice: ").strip().lower()
+        self.connect_button = ttk.Button(connection_frame, text="Connect", command=self.connect_serial)
+        self.connect_button.pack(side="left", padx=5, pady=5)
 
-        if choice == 'c':
-            capture_signal(pico)
-        elif choice == 't':
-            transmit_signal(pico)
-        elif choice == 'q':
-            break
+        self.disconnect_button = ttk.Button(connection_frame, text="Disconnect", command=self.disconnect_serial, state="disabled")
+        self.disconnect_button.pack(side="left", padx=5, pady=5)
+
+        # --- Middle Frame for Actions ---
+        action_frame = ttk.LabelFrame(self, text="Actions")
+        action_frame.pack(padx=10, pady=5, fill="x")
+
+        self.capture_button = ttk.Button(action_frame, text="Capture ('c')", command=self.send_capture_command, state="disabled")
+        self.capture_button.pack(side="left", padx=10, pady=10)
+
+        self.transmit_button = ttk.Button(action_frame, text="Transmit ('t')", command=self.send_transmit_command, state="disabled")
+        self.transmit_button.pack(side="left", padx=10, pady=10)
+
+        # --- Bottom Frame for Log ---
+        log_frame = ttk.LabelFrame(self, text="Log")
+        log_frame.pack(padx=10, pady=10, expand=True, fill="both")
+
+        self.log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, state="disabled", font=("Courier New", 9))
+        self.log_text.pack(expand=True, fill="both")
+
+        self.populate_ports()
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.after(100, self.process_queue)
+
+    def populate_ports(self):
+        """Scans for serial ports and populates the dropdown menu."""
+        ports = serial.tools.list_ports.comports()
+        # We want to display a user-friendly list, but use the device path for connection
+        self.port_map = {f"{p.device} - {p.description}": p.device for p in ports}
+        self.port_menu['values'] = list(self.port_map.keys())
+        if self.port_map:
+            self.port_menu.current(0)
         else:
-            print("Invalid choice. Please try again.")
+            self.port_var.set("No ports found")
 
-    print("Closing serial port. Goodbye!")
-    pico.close()
-
-def wait_for_status(pico_serial, expected_status, timeout_seconds=10):
-    """
-    Reads lines from the serial port until a specific status is found or a timeout occurs.
-    Returns True if the status is found, False otherwise.
-    """
-    print(f"Waiting for status: '{expected_status}'...")
-    start_time = time.time()
-    while time.time() - start_time < timeout_seconds:
-        line = pico_serial.readline().decode('utf-8').strip()
-        if line:
-            print(f"PICO > {line}")
-            if f"STATUS:{expected_status}" in line:
-                return True
-    return False
-
-def capture_signal(pico_serial):
-    """Sends the 'c' command and handles the data capture process."""
-    print("\n--- Initiating Capture ---")
-    pico_serial.write(b'c')
-
-    if not wait_for_status(pico_serial, "Armed"):
-        print("[ERROR] Device did not arm for capture.")
-        return
-
-    print("\nDevice is armed. Please press and hold a button on your 433MHz remote.")
-    print("Waiting to receive data from Pico...")
-
-    while True:
-        line = pico_serial.readline().decode('utf-8').strip()
-        if not line:
-            continue # Ignore empty lines from timeout
-
-        print(f"PICO > {line}")
-        if line.startswith("DATA:"):
-            data_str = line.replace("DATA:", "")
-            try:
-                pulses = [int(p) for p in data_str.split(',')]
-                print(f"\n[SUCCESS] Captured {len(pulses)} pulses.")
-                print(f"  First 15 pulses (us): {pulses[:15]}")
-                # The device should automatically report it's ready again.
-                wait_for_status(pico_serial, "Ready")
-                return
-            except ValueError:
-                print("[ERROR] Could not parse data received from Pico.")
-                return
-        elif "STATUS:Ready" in line:
-            print("[INFO] Capture timed out or was aborted on the Pico. Ready for new command.")
+    def connect_serial(self):
+        """Establishes the serial connection."""
+        selected_display_name = self.port_var.get()
+        if not selected_display_name or "No ports found" in selected_display_name:
+            messagebox.showerror("Error", "No serial port selected.")
             return
 
+        port = self.port_map.get(selected_display_name)
+        try:
+            self.serial_port = serial.Serial(port, 115200, timeout=1)
+            self.log_message(f"SYSTEM > Successfully connected to {port}\n")
 
-def transmit_signal(pico_serial):
-    """Sends the 't' command to transmit the last captured signal."""
-    print("\n--- Initiating Transmission ---")
-    pico_serial.write(b't')
+            self.update_gui_state("connected")
 
-    # Wait for both "Transmit complete" and "Ready" to confirm the full cycle.
-    if wait_for_status(pico_serial, "Transmit complete"):
-        wait_for_status(pico_serial, "Ready")
-        print("[SUCCESS] Transmission cycle complete.")
-    else:
-        print("[ERROR] Did not receive transmit confirmation. The Pico may not have a signal stored.")
-        # Check if it just reported an error and went back to ready.
-        wait_for_status(pico_serial, "Ready")
+            # Start a thread to read from the serial port
+            self.stop_thread = False
+            self.port_thread = threading.Thread(target=self.read_from_port)
+            self.port_thread.daemon = True
+            self.port_thread.start()
 
+        except serial.SerialException as e:
+            messagebox.showerror("Connection Failed", f"Failed to connect to {port}.\nError: {e}")
+            self.serial_port = None
+
+    def disconnect_serial(self):
+        """Closes the serial connection."""
+        if self.serial_port and self.serial_port.is_open:
+            self.stop_thread = True
+            if self.port_thread:
+                self.port_thread.join(timeout=2)
+            self.serial_port.close()
+            self.log_message(f"SYSTEM > Disconnected from serial port.\n")
+            self.serial_port = None
+
+        self.update_gui_state("disconnected")
+
+    def update_gui_state(self, state):
+        """Updates the GUI widgets based on connection state."""
+        if state == "connected":
+            self.connect_button.config(state="disabled")
+            self.disconnect_button.config(state="normal")
+            self.port_menu.config(state="disabled")
+            self.refresh_button.config(state="disabled")
+            self.capture_button.config(state="normal")
+            self.transmit_button.config(state="normal")
+        elif state == "disconnected":
+            self.connect_button.config(state="normal")
+            self.disconnect_button.config(state="disabled")
+            self.port_menu.config(state="readonly")
+            self.refresh_button.config(state="normal")
+            self.capture_button.config(state="disabled")
+            self.transmit_button.config(state="disabled")
+
+    def read_from_port(self):
+        """Runs in a separate thread to read data from the serial port."""
+        while not self.stop_thread and self.serial_port and self.serial_port.is_open:
+            try:
+                line = self.serial_port.readline().decode('utf-8').strip()
+                if line:
+                    self.data_queue.put(line)
+            except (serial.SerialException, TypeError):
+                self.data_queue.put("SYSTEM > ERROR: Serial port has been disconnected.")
+                break
+
+    def process_queue(self):
+        """Processes messages from the serial thread queue to update the GUI."""
+        try:
+            while True:
+                line = self.data_queue.get_nowait()
+                self.log_message(f"PICO > {line}\n")
+                if "ERROR:" in line:
+                    self.disconnect_serial()
+        except queue.Empty:
+            pass # No new messages
+        self.after(100, self.process_queue)
+
+    def send_command(self, command: str):
+        """Sends a command to the Pico."""
+        if self.serial_port and self.serial_port.is_open:
+            self.log_message(f"PC > Sending command: '{command}'\n")
+            self.serial_port.write(command.encode('utf-8'))
+        else:
+            messagebox.showwarning("Warning", "Not connected to a serial port.")
+
+    def send_capture_command(self):
+        self.send_command('c')
+
+    def send_transmit_command(self):
+        self.send_command('t')
+
+    def log_message(self, message: str):
+        """Appends a message to the log text area in a thread-safe way."""
+        self.log_text.config(state="normal")
+        self.log_text.insert(tk.END, message)
+        self.log_text.see(tk.END)
+        self.log_text.config(state="disabled")
+
+    def on_closing(self):
+        """Handles the window closing event."""
+        if self.serial_port and self.serial_port.is_open:
+            self.disconnect_serial()
+        self.destroy()
 
 if __name__ == "__main__":
-    print("NOTE: Please ensure you have pyserial installed (`pip install pyserial`)")
-    main()
+    # Inform user about dependencies if they are not installed
+    try:
+        import serial
+    except ImportError:
+        messagebox.showerror("Dependency Missing",
+                             "The 'pyserial' library is not installed.\n"
+                             "Please install it by running:\n\n"
+                             "pip install pyserial")
+        exit()
+
+    app = App()
+    app.mainloop()
