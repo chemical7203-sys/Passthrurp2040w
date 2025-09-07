@@ -35,14 +35,51 @@ int main()
     cc1101_init();
 
     printf("RP2040 CC1101 Signal Cloner\n");
-    printf("Send 'c' to start capture.\n");
-    printf("Send 't' to start transmit, followed by comma-separated pulse durations in us on a new line.\n");
+    printf("Commands:\n");
+    printf("  'c': Capture a signal\n");
+    printf("  't': Transmit a signal (paste data on new line)\n");
+    printf("  'p': Check SPI pin wiring\n");
 
     // The main loop
     while (true) {
         int c = getchar_timeout_us(10000);
 
-        if (c == 'c') {
+        if (c == 'p') {
+            printf("Starting pin check for 5 seconds...\n");
+            printf("Toggling CS (17), SCK (18), MOSI (19) pins.\n");
+
+            // Temporarily take control of SPI pins from the SPI peripheral
+            gpio_set_function(PIN_CS, GPIO_FUNC_SIO);
+            gpio_set_function(PIN_SCK, GPIO_FUNC_SIO);
+            gpio_set_function(PIN_MOSI, GPIO_FUNC_SIO);
+
+            uint32_t start_time = time_us_32();
+            while (time_us_32() - start_time < 5000000) { // 5 seconds
+                // Pattern 1: CS high
+                gpio_put(PIN_CS, 1); gpio_put(PIN_SCK, 0); gpio_put(PIN_MOSI, 0);
+                sleep_ms(200);
+                // Pattern 2: SCK high
+                gpio_put(PIN_CS, 0); gpio_put(PIN_SCK, 1); gpio_put(PIN_MOSI, 0);
+                sleep_ms(200);
+                // Pattern 3: MOSI high
+                gpio_put(PIN_CS, 0); gpio_put(PIN_SCK, 0); gpio_put(PIN_MOSI, 1);
+                sleep_ms(200);
+            }
+
+            // Return pins to a default low state
+            gpio_put(PIN_CS, 1); // CS is active low, so idle is high
+            gpio_put(PIN_SCK, 0);
+            gpio_put(PIN_MOSI, 0);
+
+            // Re-initialize the SPI driver to give control back to the SPI peripheral
+            spi_init(SPI_PORT, 5 * 1000 * 1000);
+            gpio_set_function(PIN_MISO, GPIO_FUNC_SPI);
+            gpio_set_function(PIN_SCK, GPIO_FUNC_SPI);
+            gpio_set_function(PIN_MOSI, GPIO_FUNC_SPI);
+
+            printf("Pin check finished.\n");
+
+        } else if (c == 'c') {
             printf("Starting capture for %d pulses...\n", CAPTURE_SIZE);
 
             PIO pio = pio0;
