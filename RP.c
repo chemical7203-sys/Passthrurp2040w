@@ -59,10 +59,10 @@ void process_uart() {
                 for (int i = 0; i < 24; i++) {
                     cs ^= pb[i];
                 }
-                // if (cs == pb[24]) { // Temporarily disable checksum for debugging
+                if (cs == pb[24]) {
                     // Copy the 23-byte payload into the padded struct
                     memcpy(&gamepad_data, &pb[1], sizeof(gamepad_data));
-                // }
+                }
                 idx = 0;
             }
         }
@@ -230,13 +230,11 @@ void debug_task() {
     start_ms += interval_ms;
 
     char buf[256];
-    uint8_t* report_bytes = (uint8_t*)&last_sent_report;
-    int offset = 0;
-    offset += sprintf(buf + offset, "HID REPORT: ");
-    for (int i = 0; i < sizeof(hid_ds4_report_t); i++) {
-        offset += sprintf(buf + offset, "%02x ", report_bytes[i]);
-    }
-    sprintf(buf + offset, "\r\n");
+    sprintf(buf, "RX: btns=%04x, lx=%d, ly=%d, rx=%d, ry=%d, dpad=%02x | AX=%d, GX=%d | ready=%d\r\n",
+            gamepad_data.buttons, gamepad_data.lx, gamepad_data.ly,
+            gamepad_data.rx, gamepad_data.ry, gamepad_data.dpad,
+            gamepad_data.accel_x, gamepad_data.gyro_x,
+            tud_hid_ready());
     uart_puts(UART_ID, buf);
 }
 
