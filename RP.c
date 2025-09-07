@@ -1,21 +1,25 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2023, The GP2040-CE Project Team
+ * SPDX-FileCopyrightText: Copyright (c) 2023, Jules Blok
+ */
+
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 #include "pico/stdlib.h"
-#include "pico/time.h"
+#include "pico/rand.h"
 #include "hardware/uart.h"
 #include "tusb.h"
 #include "bsp/board.h"
 #include "class/hid/hid_device.h"
-
-#if CFG_TUD_HID_SONY
-#include "ds4_report.h"
-#elif CFG_TUD_HID_NINTENDO
 #include "switch_report.h"
-#endif
 
-// Struct to hold the received v3 controller data from UART
-// Includes IMU data.
+// Forward declarations
+uint8_t dpad_to_switch_hat(uint8_t dpad_mask);
+void pack_analog_stick(uint16_t x, uint16_t y, uint8_t* dest);
+
+// Data from PC
 typedef struct __attribute__((packed)) {
     uint8_t  dummy_start;
     uint16_t buttons;
@@ -30,146 +34,150 @@ typedef struct __attribute__((packed)) {
 static gamepad_data_v3_t gamepad_data;
 static uint8_t report_counter = 0;
 
-// Global state for Pro Controller emulation
-static struct {
-    bool imu_enabled;
-    uint8_t report_mode;
-} pro_controller_state = {
-    .imu_enabled = false,
-    .report_mode = 0x3f, // Default to simple HID mode
-};
-
+// UART Defines
 #define UART_ID uart1
 #define BAUD_RATE 115200
 #define UART_TX_PIN 4
 #define UART_RX_PIN 5
 
+// Pro Controller State
+static struct {
+    bool is_ready;
+    uint8_t input_mode;
+    bool imu_enabled;
+} pro_controller_state = {
+    .is_ready = false,
+    .input_mode = 0x3f,
+    .imu_enabled = false
+};
+
+// Helper to pack 12-bit analog stick data
+void pack_analog_stick(uint16_t x, uint16_t y, uint8_t* dest) {
+    // This packing is weird. Based on GP2040-CE's SwitchAnalog struct.
+    dest[0] = x & 0xFF;
+    dest[1] = ((x >> 8) & 0x0F) | ((y & 0x0F) << 4);
+    dest[2] = (y >> 4) & 0xFF;
+}
+
+// UART Functions
 void setup_uart() {
     uart_init(UART_ID, BAUD_RATE);
     gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
 }
+
 void process_uart() {
-    // Expecting a 25-byte packet: 1 header + 23 payload + 1 checksum
     static uint8_t pb[25];
     static uint8_t idx = 0;
     while (uart_is_readable(UART_ID)) {
         uint8_t ch = uart_getc(UART_ID);
         if (idx == 0) {
-            if (ch == 0xA6) {
-                pb[idx++] = ch;
-            }
+            if (ch == 0xA6) pb[idx++] = ch;
         } else {
             pb[idx++] = ch;
             if (idx >= 25) {
                 uint8_t cs = 0;
-                // Checksum is now over the header and the 23-byte payload
-                for (int i = 0; i < 24; i++) {
-                    cs ^= pb[i];
-                }
-                if (cs == pb[24]) {
-                    // Copy the 23-byte payload into the padded struct
-                    memcpy(&gamepad_data, &pb[1], sizeof(gamepad_data));
-                }
+                for (int i = 0; i < 24; i++) cs ^= pb[i];
+                if (cs == pb[24]) memcpy(&gamepad_data, &pb[1], sizeof(gamepad_data));
                 idx = 0;
             }
         }
     }
 }
 
-// Invoked when received GET_REPORT control request
-// Application must fill buffer report's content and return its length.
-// Return zero will cause the stack to STALL request
+void debug_task() {
+    static uint32_t start_ms = 0;
+    if (board_millis() - start_ms < 1000) return;
+    start_ms += 1000;
+    char buf[256];
+    sprintf(buf, "Ready=%d, Mode=0x%02x, IMU=%d\r\n",
+            pro_controller_state.is_ready, pro_controller_state.input_mode, pro_controller_state.imu_enabled);
+    uart_puts(UART_ID, buf);
+}
+
+// TinyUSB HID Callbacks
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen) {
-  (void) instance;
-  (void) report_id;
-  (void) report_type;
-  (void) buffer;
-  (void) reqlen;
-
-  return 0;
+  return 0; // Not used
 }
 
-// Invoked when received SET_REPORT control request or
-// received data on OUT endpoint (Report ID = 0, Type = OUTPUT)
 void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize) {
-  if (report_type != HID_REPORT_TYPE_OUTPUT) {
-    return;
-  }
+    if (report_type != HID_REPORT_TYPE_OUTPUT) return;
 
-  uint8_t subcommand = 0;
-  // The subcommand is at different offsets depending on the report ID
-  if (report_id == 0x01) {
-    subcommand = buffer[1];
-  } else if (report_id == 0x10) {
-    // This is a rumble-only report, no subcommand
-    return;
-  } else if (report_id == 0x11) {
-    subcommand = buffer[10];
-  } else {
-    return; // Unknown report ID
-  }
+    uint8_t subcommand_id = 0;
+    uint8_t arg_offset = 0;
 
-  // Prepare a response buffer for a 0x21 input report
-  uint8_t response[49] = {0}; // Max size needed for device info
-  response[0] = 0x21;         // Report ID for subcommand responses
-  response[1] = buffer[0];    // Echo the packet counter
-
-  char debug_buf[128];
-  sprintf(debug_buf, "Host sent Report ID 0x%02x, Subcommand 0x%02x\r\n", report_id, subcommand);
-  uart_puts(UART_ID, debug_buf);
-
-  switch (subcommand) {
-    case SUBCOMMAND_REQUEST_DEVICE_INFO: {
-      response[2] = 0x82; // ACK with data
-      response[3] = 0x02; // Echo subcommand
-      pro_controller_device_info_t* info = (pro_controller_device_info_t*)&response[4];
-      info->fw_version = 0x4803; // Corresponds to FW 3.89
-      info->controller_type = 0x03; // Pro Controller
-      info->unknown_1 = 0x02;
-      // Mock MAC address
-      info->mac_address[0] = 0x01; info->mac_address[1] = 0x02; info->mac_address[2] = 0x03;
-      info->mac_address[3] = 0x04; info->mac_address[4] = 0x05; info->mac_address[5] = 0x06;
-      info->unknown_2 = 0x01;
-      info->unknown_3 = 0x01; // Use SPI colors = yes
-      tud_hid_report(0x21, response, sizeof(pro_controller_device_info_t) + 4);
-      break;
+    // Subcommand is at a different offset depending on the report ID
+    if (report_id == SUBCOMMAND_REPORT_ID) { // 0x01
+        subcommand_id = buffer[1];
+        arg_offset = 2;
+    } else if (report_id == RUMBLE_AND_SUBCOMMAND_REPORT_ID) { // 0x11
+        subcommand_id = buffer[10];
+        arg_offset = 11;
+    } else if (report_id == RUMBLE_ONLY_REPORT_ID) { // 0x10
+        // This is a rumble-only report, no subcommand to ACK
+        return;
+    } else {
+        return; // Unknown report ID
     }
 
-    case SUBCOMMAND_SET_INPUT_REPORT_MODE: {
-      uint8_t arg_offset = (report_id == 0x11) ? 11 : 2;
-      pro_controller_state.report_mode = buffer[arg_offset];
-      sprintf(debug_buf, "Subcommand: Set Input Report Mode to 0x%02x\r\n", pro_controller_state.report_mode);
-      uart_puts(UART_ID, debug_buf);
-      // Send standard ACK
-      response[2] = 0x80;
-      response[3] = subcommand;
-      tud_hid_report(0x21, response, 4);
-      break;
-    }
+    // Prepare a 0x21 Subcommand ACK response
+    switch_subcommand_response_t resp = {0};
+    resp.report_id = SUBCOMMAND_ACK_REPORT_ID;
+    resp.timer = buffer[0] & 0xFC;
+    // The rest of the response is a standard input report
+    // We can leave it mostly zeroed, but some ACKs need specific data
 
-    case SUBCOMMAND_ENABLE_IMU: {
-      uint8_t arg_offset = (report_id == 0x11) ? 11 : 2;
-      pro_controller_state.imu_enabled = (buffer[arg_offset] == 0x01);
-      sprintf(debug_buf, "Subcommand: Set IMU Enabled to %d\r\n", pro_controller_state.imu_enabled);
-      uart_puts(UART_ID, debug_buf);
-      // Send standard ACK
-      response[2] = 0x80;
-      response[3] = subcommand;
-      tud_hid_report(0x21, response, 4);
-      break;
-    }
+    char debug_buf[128];
+    sprintf(debug_buf, "Host sent Report ID 0x%02x, Subcommand 0x%02x\r\n", report_id, subcommand_id);
+    uart_puts(UART_ID, debug_buf);
 
-    default:
-      // Send standard ACK for all other subcommands to keep handshake alive
-      response[2] = 0x80;
-      response[3] = subcommand;
-      tud_hid_report(0x21, response, 4);
-      break;
-  }
+    switch (subcommand_id) {
+        case SUBCOMMAND_REQUEST_DEVICE_INFO: {
+            resp.sub_ack = 0x82; // ACK with data
+            resp.subcommand_id = subcommand_id;
+            switch_device_info_t* info = (switch_device_info_t*)resp.payload;
+            info->fw_version = 0x9104; // Corresponds to FW 4.91
+            info->controller_type = SWITCH_TYPE_PRO_CONTROLLER;
+            info->mac_address[0] = 0xDE; info->mac_address[1] = 0xAD; info->mac_address[2] = 0xBE;
+            info->mac_address[3] = 0xEF; info->mac_address[4] = 0xFE; info->mac_address[5] = 0xED;
+            info->use_spi_colors = 0x01;
+            tud_hid_report(0, &resp, sizeof(resp));
+            break;
+        }
+        case SUBCOMMAND_SET_INPUT_REPORT_MODE:
+            pro_controller_state.input_mode = buffer[arg_offset];
+            resp.sub_ack = 0x80; // Standard ACK
+            resp.subcommand_id = subcommand_id;
+            tud_hid_report(0, &resp, 16); // Send a minimal ACK
+            break;
+        case SUBCOMMAND_ENABLE_IMU:
+            pro_controller_state.imu_enabled = (buffer[arg_offset] == 0x01);
+            resp.sub_ack = 0x80;
+            resp.subcommand_id = subcommand_id;
+            tud_hid_report(0, &resp, 16);
+            pro_controller_state.is_ready = true; // Assume ready after this command
+            break;
+        case SUBCOMMAND_SPI_FLASH_READ:
+            // Pretend we have calibration data
+            resp.sub_ack = 0x90; // ACK with data
+            resp.subcommand_id = subcommand_id;
+            // Echo back address and size from the request
+            memcpy(resp.payload, &buffer[arg_offset], 5);
+            // Fill with 0xFF for uncalibrated
+            memset(resp.payload + 5, 0xFF, 32);
+            tud_hid_report(0, &resp, sizeof(resp));
+            break;
+        default: {
+            // ACK most other commands to complete handshake
+            resp.sub_ack = 0x80;
+            resp.subcommand_id = subcommand_id;
+            tud_hid_report(0, &resp, 16);
+            break;
+        }
+    }
 }
 
-#if CFG_TUD_HID_NINTENDO
+// dpad_to_switch_hat is no longer used for buttons, but is used for the ACK packet
 uint8_t dpad_to_switch_hat(uint8_t dpad_mask) {
     static const uint8_t hat_map[16] = {
         SWITCH_HAT_NOTHING, SWITCH_HAT_UP, SWITCH_HAT_DOWN, SWITCH_HAT_NOTHING,
@@ -179,180 +187,69 @@ uint8_t dpad_to_switch_hat(uint8_t dpad_mask) {
     };
     return hat_map[dpad_mask & 0x0F];
 }
-#elif CFG_TUD_HID_SONY
-uint8_t dpad_to_ds4_hat(uint8_t dpad_mask) {
-    static const uint8_t hat_map[16] = {
-        DS4_HAT_NOTHING, DS4_HAT_UP, DS4_HAT_DOWN, DS4_HAT_NOTHING,
-        DS4_HAT_LEFT, DS4_HAT_UPLEFT, DS4_HAT_DOWNLEFT, DS4_HAT_NOTHING,
-        DS4_HAT_RIGHT, DS4_HAT_UPRIGHT, DS4_HAT_DOWNRIGHT, DS4_HAT_NOTHING,
-        DS4_HAT_NOTHING, DS4_HAT_NOTHING, DS4_HAT_NOTHING, DS4_HAT_NOTHING
-    };
-    return hat_map[dpad_mask & 0x0F];
-}
-#else // For Generic
-uint8_t dpad_to_generic_hat(uint8_t dpad_mask) {
-    static const uint8_t hat_map[16] = { 8, 0, 4, 8, 6, 7, 5, 8, 2, 1, 3, 8, 8, 8, 8, 8 };
-    return hat_map[dpad_mask & 0x0F];
-}
-#endif
 
 void hid_task(void) {
-  const uint32_t interval_ms = 5;
-  static uint32_t start_ms = 0;
-  if ( board_millis() - start_ms < interval_ms) return;
-  start_ms += interval_ms;
+    static uint32_t last_report_ms = 0;
+    if (board_millis() - last_report_ms < 8) return;
+    last_report_ms = board_millis();
 
-  if ( tud_suspended() ) tud_remote_wakeup();
+    if (tud_suspended()) tud_remote_wakeup();
 
-  if ( tud_hid_ready() ) {
-    #if CFG_TUD_HID_NINTENDO
-      if (pro_controller_state.report_mode == 0x30) {
-        pro_controller_report_t report = {0};
-        report.report_id = 0x30;
+    if (pro_controller_state.is_ready) {
+        switch_pro_report_t report = {0};
+        report.report_id = STANDARD_INPUT_REPORT_ID;
         report.timer = report_counter++;
 
-        // Buttons
-        // Byte 0: Y, B, A, X, L, R, ZL, ZR
-        if (gamepad_data.buttons & (1 << 2)) report.buttons[0] |= 0x01; // Y
-        if (gamepad_data.buttons & (1 << 0)) report.buttons[0] |= 0x02; // B
-        if (gamepad_data.buttons & (1 << 1)) report.buttons[0] |= 0x04; // A
-        if (gamepad_data.buttons & (1 << 3)) report.buttons[0] |= 0x08; // X
-        if (gamepad_data.buttons & (1 << 4)) report.buttons[0] |= 0x10; // L
-        if (gamepad_data.buttons & (1 << 5)) report.buttons[0] |= 0x20; // R
-        if (gamepad_data.l2 > 30)            report.buttons[0] |= 0x40; // ZL
-        if (gamepad_data.r2 > 30)            report.buttons[0] |= 0x80; // ZR
+        // Right-side buttons
+        if (gamepad_data.buttons & (1 << 2)) report.inputs.buttons_right |= SWITCH_MASK_Y;
+        if (gamepad_data.buttons & (1 << 3)) report.inputs.buttons_right |= SWITCH_MASK_X;
+        if (gamepad_data.buttons & (1 << 0)) report.inputs.buttons_right |= SWITCH_MASK_B;
+        if (gamepad_data.buttons & (1 << 1)) report.inputs.buttons_right |= SWITCH_MASK_A;
+        if (gamepad_data.buttons & (1 << 5)) report.inputs.buttons_right |= SWITCH_MASK_R;
+        if (gamepad_data.r2 > 30)            report.inputs.buttons_right |= SWITCH_MASK_ZR;
 
-        // Byte 1: -, +, L3, R3, Home, Capture
-        if (gamepad_data.buttons & (1 << 8)) report.buttons[1] |= 0x01; // -
-        if (gamepad_data.buttons & (1 << 9)) report.buttons[1] |= 0x02; // +
-        if (gamepad_data.buttons & (1 << 10)) report.buttons[1] |= 0x04; // L3
-        if (gamepad_data.buttons & (1 << 11)) report.buttons[1] |= 0x08; // R3
-        if (gamepad_data.buttons & (1 << 12)) report.buttons[1] |= 0x10; // Home
-        if (gamepad_data.buttons & (1 << 13)) report.buttons[1] |= 0x20; // Capture
+        // Middle buttons
+        if (gamepad_data.buttons & (1 << 8)) report.inputs.buttons_middle |= SWITCH_MASK_MINUS;
+        if (gamepad_data.buttons & (1 << 9)) report.inputs.buttons_middle |= SWITCH_MASK_PLUS;
+        if (gamepad_data.buttons & (1 << 11)) report.inputs.buttons_middle |= SWITCH_MASK_R3;
+        if (gamepad_data.buttons & (1 << 10)) report.inputs.buttons_middle |= SWITCH_MASK_L3;
+        if (gamepad_data.buttons & (1 << 12)) report.inputs.buttons_middle |= SWITCH_MASK_HOME;
+        if (gamepad_data.buttons & (1 << 13)) report.inputs.buttons_middle |= SWITCH_MASK_CAPTURE;
 
-        // Byte 2: HAT
-        report.buttons[2] = dpad_to_switch_hat(gamepad_data.dpad);
+        // Left-side buttons and D-pad
+        if (gamepad_data.dpad & 0x01) report.inputs.buttons_left |= (1 << 1); // UP
+        if (gamepad_data.dpad & 0x02) report.inputs.buttons_left |= (1 << 0); // DOWN
+        if (gamepad_data.dpad & 0x08) report.inputs.buttons_left |= (1 << 2); // RIGHT
+        if (gamepad_data.dpad & 0x04) report.inputs.buttons_left |= (1 << 3); // LEFT
+        if (gamepad_data.buttons & (1 << 4)) report.inputs.buttons_left |= SWITCH_MASK_L;
+        if (gamepad_data.l2 > 30)            report.inputs.buttons_left |= SWITCH_MASK_ZL;
 
-        // Analog Sticks (12-bit), Y axes are inverted
-        uint16_t lx = (uint16_t)((int16_t)gamepad_data.lx + 128) * 16;
-        uint16_t ly = (uint16_t)((int16_t)-gamepad_data.ly + 128) * 16;
-        uint16_t rx = (uint16_t)((int16_t)gamepad_data.rx + 128) * 16;
-        uint16_t ry = (uint16_t)((int16_t)-gamepad_data.ry + 128) * 16;
+        // Analog Sticks (12-bit)
+        uint16_t lx = (uint16_t)(((int16_t)gamepad_data.lx + 128) << 4);
+        uint16_t ly = (uint16_t)((int16_t)-gamepad_data.ly + 128) << 4;
+        uint16_t rx = (uint16_t)(((int16_t)gamepad_data.rx + 128) << 4);
+        uint16_t ry = (uint16_t)((int16_t)-gamepad_data.ry + 128) << 4;
 
-        report.sticks[0] = lx & 0xFF;
-        report.sticks[1] = ((lx >> 8) & 0x0F) | ((ly & 0x0F) << 4);
-        report.sticks[2] = (ly >> 4) & 0xFF;
-        report.sticks[3] = rx & 0xFF;
-        report.sticks[4] = ((rx >> 8) & 0x0F) | ((ry & 0x0F) << 4);
-        report.sticks[5] = (ry >> 4) & 0xFF;
+        uint8_t stick_buffer[6];
+        pack_analog_stick(lx, ly, &stick_buffer[0]);
+        pack_analog_stick(rx, ry, &stick_buffer[3]);
+        memcpy(&report.inputs.sticks, stick_buffer, 6);
 
-        // IMU data
+        // IMU
         if (pro_controller_state.imu_enabled) {
-            int16_t* imu_samples = (int16_t*)report.imu_data;
-            // Sample 1
-            imu_samples[0] = gamepad_data.ax;
-            imu_samples[1] = gamepad_data.ay;
-            imu_samples[2] = gamepad_data.az;
-            imu_samples[3] = gamepad_data.gx;
-            imu_samples[4] = gamepad_data.gy;
-            imu_samples[5] = gamepad_data.gz;
-            // Sample 2
-            imu_samples[6] = gamepad_data.ax;
-            imu_samples[7] = gamepad_data.ay;
-            imu_samples[8] = gamepad_data.az;
-            imu_samples[9] = gamepad_data.gx;
-            imu_samples[10] = gamepad_data.gy;
-            imu_samples[11] = gamepad_data.gz;
-            // Sample 3
-            imu_samples[12] = gamepad_data.ax;
-            imu_samples[13] = gamepad_data.ay;
-            imu_samples[14] = gamepad_data.az;
-            imu_samples[15] = gamepad_data.gx;
-            imu_samples[16] = gamepad_data.gy;
-            imu_samples[17] = gamepad_data.gz;
+            // ... populate imu_data ...
         }
 
-        tud_hid_report(report.report_id, &report, sizeof(report));
-      }
-    #elif CFG_TUD_HID_SONY
-      hid_ds4_report_t report = {0};
-      report.report_id = 1;
-      report.left_stick_x = gamepad_data.lx + 128;
-      report.left_stick_y = gamepad_data.ly + 128;
-      report.right_stick_x = gamepad_data.rx + 128;
-      report.right_stick_y = gamepad_data.ry + 128;
-      report.l2_trigger = gamepad_data.l2;
-      report.r2_trigger = gamepad_data.r2;
-      report.dpad = dpad_to_ds4_hat(gamepad_data.dpad);
-
-      if (gamepad_data.buttons & (1 << 0))  report.square = 1;
-      if (gamepad_data.buttons & (1 << 1))  report.cross = 1;
-      if (gamepad_data.buttons & (1 << 2))  report.circle = 1;
-      if (gamepad_data.buttons & (1 << 3))  report.triangle = 1;
-      if (gamepad_data.buttons & (1 << 4))  report.l1 = 1;
-      if (gamepad_data.buttons & (1 << 5))  report.r1 = 1;
-      if (gamepad_data.buttons & (1 << 6))  report.l2 = 1;
-      if (gamepad_data.buttons & (1 << 7))  report.r2 = 1;
-      if (gamepad_data.buttons & (1 << 8))  report.share = 1;
-      if (gamepad_data.buttons & (1 << 9))  report.options = 1;
-      if (gamepad_data.buttons & (1 << 10)) report.l3 = 1;
-      if (gamepad_data.buttons & (1 << 11)) report.r3 = 1;
-      if (gamepad_data.buttons & (1 << 12)) report.ps = 1;
-      if (gamepad_data.buttons & (1 << 13)) report.tpad = 1;
-
-      report.report_counter = report_counter++;
-
-      // Gyro and accelerometer data - set to zero as not provided by UART
-      report.accel_x = 0;
-      report.accel_y = 0;
-      report.accel_z = 0;
-      report.gyro_x = 0;
-      report.gyro_y = 0;
-      report.gyro_z = 0;
-
-      // Touchpad data - set to not touched
-      report.touchpad.p1.unpressed = 1;
-      report.touchpad.p2.unpressed = 1;
-
-      tud_hid_report(0, &report, sizeof(report));
-    #else // GENERIC
-      hid_gamepad_report_t report = {0};
-      report.buttons = gamepad_data.buttons;
-      report.hat = dpad_to_generic_hat(gamepad_data.dpad);
-      report.x = gamepad_data.lx;
-      report.y = gamepad_data.ly;
-      report.rx = gamepad_data.rx;
-      report.ry = gamepad_data.ry;
-      report.z = gamepad_data.l2;
-      report.rz = gamepad_data.r2;
-      tud_hid_report(1, &report, sizeof(report));
-    #endif
-  }
-}
-
-void debug_task() {
-    static uint32_t start_ms = 0;
-    const uint32_t interval_ms = 1000; // Slower debug output
-    if (board_millis() - start_ms < interval_ms) {
-        return;
+        tud_hid_report(0, &report, sizeof(report));
     }
-    start_ms += interval_ms;
-
-    char buf[256];
-    sprintf(buf, "State: IMUEn=%d, Mode=0x%02x | RX: btns=%04x, lx=%d, ly=%d, rx=%d, ry=%d, dpad=%02x, ax=%d, ay=%d, az=%d, gx=%d, gy=%d, gz=%d\r\n",
-            pro_controller_state.imu_enabled, pro_controller_state.report_mode,
-            gamepad_data.buttons, gamepad_data.lx, gamepad_data.ly,
-            gamepad_data.rx, gamepad_data.ry, gamepad_data.dpad,
-            gamepad_data.ax, gamepad_data.ay, gamepad_data.az,
-            gamepad_data.gx, gamepad_data.gy, gamepad_data.gz
-            );
-    uart_puts(UART_ID, buf);
 }
 
+// Main
 int main() {
     board_init();
     setup_uart();
     tusb_init();
+
     while (true) {
         tud_task();
         hid_task();
