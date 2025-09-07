@@ -77,51 +77,34 @@ uint8_t const desc_hid_report[] = {
     0x09, 0x32,        //   Usage (Z)
     0x09, 0x35,        //   Usage (Rz)
     0x16, 0x00, 0x00,  //   Logical Minimum (0)
-    0x26, 0xFF, 0x0F,  //   Logical Maximum (4095)
+    0x26, 0xFF, 0xFF,  //   Logical Maximum (65535)
     0x75, 0x10,        //   Report Size (16)
     0x95, 0x04,        //   Report Count (4)
     0x81, 0x02,        //   Input (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
     0x75, 0x08,        //   Report Size (8)
     0x95, 0x30,        //   Report Count (48)
     0x81, 0x03,        //   Input (Const,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
-
     0x85, 0x21,        //   Report ID (33)
     0x06, 0x00, 0xFF,  //   Usage Page (Vendor Defined 0xFF00)
     0x09, 0x01,        //   Usage (0x01)
     0x75, 0x08,        //   Report Size (8)
     0x95, 0x3F,        //   Report Count (63)
     0x81, 0x03,        //   Input (Const,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
-
-    0x85, 0x81,        //   Report ID (-127)
-    0x09, 0x02,        //   Usage (0x02)
-    0x75, 0x08,        //   Report Size (8)
-    0x95, 0x3F,        //   Report Count (63)
-    0x81, 0x03,        //   Input (Const,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
-
     0x85, 0x01,        //   Report ID (1)
     0x09, 0x03,        //   Usage (0x03)
     0x75, 0x08,        //   Report Size (8)
     0x95, 0x3F,        //   Report Count (63)
     0x91, 0x83,        //   Output (Const,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Volatile)
-
     0x85, 0x10,        //   Report ID (16)
     0x09, 0x04,        //   Usage (0x04)
     0x75, 0x08,        //   Report Size (8)
     0x95, 0x3F,        //   Report Count (63)
     0x91, 0x83,        //   Output (Const,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Volatile)
-
-    0x85, 0x80,        //   Report ID (-128)
+    0x85, 0x11,        //   Report ID (17)
     0x09, 0x05,        //   Usage (0x05)
     0x75, 0x08,        //   Report Size (8)
     0x95, 0x3F,        //   Report Count (63)
     0x91, 0x83,        //   Output (Const,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Volatile)
-
-    0x85, 0x82,        //   Report ID (-126)
-    0x09, 0x06,        //   Usage (0x06)
-    0x75, 0x08,        //   Report Size (8)
-    0x95, 0x3F,        //   Report Count (63)
-    0x91, 0x83,        //   Output (Const,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Volatile)
-
     0xC0,              // End Collection
 };
 
