@@ -94,24 +94,21 @@ class SerialHandler:
         gyro_y = max(-32767, min(32767, state.get('gyro_y', 0)))
         gyro_z = max(-32767, min(32767, state.get('gyro_z', 0)))
 
-        dummy_start = 0x00
-        dummy_end = 0x00
         header = 0xA6
 
-        # 1. Construct the 23-byte padded payload
-        # Format: < (little-endian), B (dummy), H (buttons), 4b (sticks), B(l2), B(r2), B(dpad), 6h (motion), B (dummy)
-        payload = struct.pack('<BH4bBBB6hB',
-            dummy_start, buttons, lx, ly, rx, ry, l2, r2, dpad,
-            accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z,
-            dummy_end
+        # 1. Construct the 21-byte payload
+        # Format: < (little-endian), H (buttons), 4b (sticks), B(l2), B(r2), B(dpad), 6h (motion)
+        payload = struct.pack('<H4bBBB6h',
+            buttons, lx, ly, rx, ry, l2, r2, dpad,
+            accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z
         )
 
-        # 2. Calculate checksum over the header and the 23-byte padded payload
+        # 2. Calculate checksum over the header and the 21-byte payload
         checksum = header
         for byte in payload:
             checksum ^= byte
 
-        # 3. Return the final 25-byte packet
+        # 3. Return the final 23-byte packet
         return bytearray([header]) + payload + bytearray([checksum])
 
     def send_gamepad_state_v2(self, state):

@@ -15,16 +15,13 @@
 #endif
 
 // Struct to hold the received v2 controller data from UART
-// Includes padding bytes to solve potential UART timing/framing issues
 typedef struct __attribute__((packed)) {
-    uint8_t  dummy_start;
     uint16_t buttons;
     int8_t   lx, ly, rx, ry;
     uint8_t  l2, r2;
     uint8_t  dpad;
     int16_t  accel_x, accel_y, accel_z;
     int16_t  gyro_x, gyro_y, gyro_z;
-    uint8_t  dummy_end;
 } gamepad_data_v2_t;
 
 static gamepad_data_v2_t gamepad_data;
@@ -42,8 +39,8 @@ void setup_uart() {
     gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
 }
 void process_uart() {
-    // Expecting a 25-byte packet: 1 header + 23 payload + 1 checksum
-    static uint8_t pb[25];
+    // Expecting a 23-byte packet: 1 header + 21 payload + 1 checksum
+    static uint8_t pb[23];
     static uint8_t idx = 0;
     while (uart_is_readable(UART_ID)) {
         uint8_t ch = uart_getc(UART_ID);
@@ -53,14 +50,14 @@ void process_uart() {
             }
         } else {
             pb[idx++] = ch;
-            if (idx >= 25) {
+            if (idx >= 23) {
                 uint8_t cs = 0;
-                // Checksum is now over the header and the 23-byte payload
-                for (int i = 0; i < 24; i++) {
+                // Checksum is now over the header and the 21-byte payload
+                for (int i = 0; i < 22; i++) {
                     cs ^= pb[i];
                 }
-                if (cs == pb[24]) {
-                    // Copy the 23-byte payload into the padded struct
+                if (cs == pb[22]) {
+                    // Copy the 21-byte payload into the struct
                     memcpy(&gamepad_data, &pb[1], sizeof(gamepad_data));
                 }
                 idx = 0;
