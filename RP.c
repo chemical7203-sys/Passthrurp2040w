@@ -17,8 +17,9 @@
 // Struct to hold the received v2 controller data from UART
 typedef struct __attribute__((packed)) {
     uint16_t buttons;
-    int8_t   lx, ly, rx, ry;
+    int8_t   lx, ly;
     uint8_t  l2, r2;
+    int8_t   rx, ry;
     uint8_t  dpad;
     int16_t  accel_x, accel_y, accel_z;
     int16_t  gyro_x, gyro_y, gyro_z;
@@ -95,15 +96,7 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
 }
 
 #if CFG_TUD_HID_NINTENDO
-uint8_t dpad_to_switch_hat(uint8_t dpad_mask) {
-    static const uint8_t hat_map[16] = {
-        SWITCH_HAT_NOTHING, SWITCH_HAT_UP, SWITCH_HAT_DOWN, SWITCH_HAT_NOTHING,
-        SWITCH_HAT_LEFT, SWITCH_HAT_UPLEFT, SWITCH_HAT_DOWNLEFT, SWITCH_HAT_NOTHING,
-        SWITCH_HAT_RIGHT, SWITCH_HAT_UPRIGHT, SWITCH_HAT_DOWNRIGHT, SWITCH_HAT_NOTHING,
-        SWITCH_HAT_NOTHING, SWITCH_HAT_NOTHING, SWITCH_HAT_NOTHING, SWITCH_HAT_NOTHING
-    };
-    return hat_map[dpad_mask & 0x0F];
-}
+// dpad_to_switch_hat removed, rotational fix is implemented directly.
 #elif CFG_TUD_HID_SONY
 // We are using a generic gamepad report, so we need a generic hat conversion.
 uint8_t dpad_to_generic_hat(uint8_t dpad_mask) {
@@ -131,10 +124,10 @@ void hid_task(void) {
 
       // Button mapping uses direct 1-to-1 logic.
       // The padding fix should resolve any data corruption issues.
-      if (gamepad_data.buttons & (1 << 1)) report.buttons |= SWITCH_MASK_A;
-      if (gamepad_data.buttons & (1 << 0)) report.buttons |= SWITCH_MASK_B;
-      if (gamepad_data.buttons & (1 << 3)) report.buttons |= SWITCH_MASK_X;
-      if (gamepad_data.buttons & (1 << 2)) report.buttons |= SWITCH_MASK_Y;
+      if (gamepad_data.buttons & (1 << 1)) report.buttons |= SWITCH_MASK_B;
+      if (gamepad_data.buttons & (1 << 0)) report.buttons |= SWITCH_MASK_A;
+      if (gamepad_data.buttons & (1 << 3)) report.buttons |= SWITCH_MASK_Y;
+      if (gamepad_data.buttons & (1 << 2)) report.buttons |= SWITCH_MASK_X;
       if (gamepad_data.buttons & (1 << 4)) report.buttons |= SWITCH_MASK_L;
       if (gamepad_data.buttons & (1 << 5)) report.buttons |= SWITCH_MASK_R;
       if (gamepad_data.l2 > 30) report.buttons |= SWITCH_MASK_ZL;
@@ -147,7 +140,9 @@ void hid_task(void) {
       if (gamepad_data.buttons & (1 << 13)) report.buttons |= SWITCH_MASK_CAPTURE;
 
       // D-pad
-      report.hat = dpad_to_switch_hat(gamepad_data.dpad);
+      // Fix D-pad rotational bug. The received value is off by -1.
+      // True state = (received state + 1) % 9.
+      report.hat = (gamepad_data.dpad + 1) % 9;
 
       // Analog sticks
       report.lx = gamepad_data.lx + 128;
