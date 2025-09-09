@@ -112,11 +112,12 @@ void process_uart() {
 // Return zero will cause the stack to STALL request
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen) {
   (void) instance;
-  (void) report_type;
   (void) buffer;
   (void) reqlen;
 
-  printf("GET_REPORT: id=%02x\r\n", report_id);
+  char debug_str[100];
+  sprintf(debug_str, "DEBUG GET_REPORT: id=%02x, type=%d\r\n", report_id, report_type);
+  debug_puts(debug_str);
 
   return 0;
 }
@@ -125,14 +126,12 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_t
 // received data on OUT endpoint (Report ID = 0, Type = OUTPUT)
 void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize) {
   (void) instance;
-  (void) report_type;
-  (void) buffer;
-  (void) bufsize;
 
-  printf("SET_REPORT: id=%02x\r\n", report_id);
-
-  // echo back anything we received from host
-  // tud_hid_report(0, buffer, bufsize);
+  char debug_str[100];
+  sprintf(debug_str, "DEBUG SET_REPORT: id=%02x, type=%d, size=%u\r\n", report_id, report_type, bufsize);
+  debug_puts(debug_str);
+  debug_puts("DEBUG SET_REPORT: Host sent data:\r\n");
+  print_buf_hex(buffer, bufsize);
 }
 
 #if CFG_TUD_HID_NINTENDO
@@ -181,18 +180,11 @@ void hid_task(void) {
         last_hid_debug_ms = board_millis();
         should_print_debug = true;
     }
-
-    if (should_print_debug) {
-        char debug_str[50];
-        sprintf(debug_str, "DEBUG HID: tud_hid_ready() = %d\r\n", tud_hid_ready());
-        debug_puts(debug_str);
-    }
     // --- DEBUG END ---
 
     if ( tud_hid_ready() ) {
       // Build and send a full DS4 report
       hid_ds4_report_t report = {0};
-
       report.report_id = 0x01;
 
       // Analog sticks - convert from int8 to uint8
@@ -205,18 +197,15 @@ void hid_task(void) {
       report.l2_trigger = gamepad_data.l2;
       report.r2_trigger = gamepad_data.r2;
 
-      // D-Pad - fix rotational bug
-      // True state = (received state + 1) % 9.
+      // D-Pad - fix rotational bug and out-of-range value
       uint8_t corrected_dpad = (gamepad_data.dpad + 1) % 9;
-      if (corrected_dpad == 8) { // 8 is the standard neutral value
-        // The descriptor's logical max is 7, so 8 is out of range.
-        // The reference passinglink project uses 15 for neutral. Let's try that.
-        report.dpad = 15;
+      if (corrected_dpad == 8) { // 8 is standard neutral, but descriptor max is 7
+        report.dpad = 15; // Use value from passinglink reference project
       } else {
         report.dpad = corrected_dpad;
       }
 
-      // Buttons - map from gamepad_data.buttons to the bitfield
+      // Buttons
       report.circle = (gamepad_data.buttons >> 0) & 1;
       report.cross = (gamepad_data.buttons >> 1) & 1;
       report.square = (gamepad_data.buttons >> 2) & 1;
@@ -232,17 +221,28 @@ void hid_task(void) {
       report.ps = (gamepad_data.buttons >> 12) & 1;
       report.tpad_click = (gamepad_data.buttons >> 13) & 1;
 
-      // Report counter - just increment
+      // Report counter
       static uint8_t ds4_report_counter = 0;
       report.report_counter = ds4_report_counter++;
 
-      bool success = tud_hid_report(1, &report, sizeof(report));
+      // --- DEBUG: Check endpoint status and memory integrity before sending ---
+      bool ep_in_busy = tud_hid_n_ep_busy(0, TUD_DIR_IN);
+      bool success = false;
 
-      // --- DEBUG START ---
       if (should_print_debug) {
           char debug_str[100];
-          sprintf(debug_str, "DEBUG HID: Report sticks (LX,LY,RX,RY): %u,%u,%u,%u\r\n", report.left_stick_x, report.left_stick_y, report.right_stick_x, report.right_stick_y);
+          sprintf(debug_str, "DEBUG HID: tud_hid_ready()=%d, ep_busy=%d\r\n", tud_hid_ready(), ep_in_busy);
           debug_puts(debug_str);
+          sprintf(debug_str, "DEBUG HID: Pre-send dpad value = %u\r\n", report.dpad);
+          debug_puts(debug_str);
+      }
+
+      if (!ep_in_busy) {
+        success = tud_hid_report(1, &report, sizeof(report));
+      }
+
+      if (should_print_debug) {
+          char debug_str[50];
           sprintf(debug_str, "DEBUG HID: tud_hid_report() success = %d\r\n", success);
           debug_puts(debug_str);
       }
