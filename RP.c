@@ -207,8 +207,14 @@ void hid_task(void) {
 
       // D-Pad - fix rotational bug
       // True state = (received state + 1) % 9.
-      // The value 8 is the standard for neutral hat.
-      report.dpad = (gamepad_data.dpad + 1) % 9;
+      uint8_t corrected_dpad = (gamepad_data.dpad + 1) % 9;
+      if (corrected_dpad == 8) { // 8 is the standard neutral value
+        // The descriptor's logical max is 7, so 8 is out of range.
+        // The reference passinglink project uses 15 for neutral. Let's try that.
+        report.dpad = 15;
+      } else {
+        report.dpad = corrected_dpad;
+      }
 
       // Buttons - map from gamepad_data.buttons to the bitfield
       report.circle = (gamepad_data.buttons >> 0) & 1;
@@ -285,7 +291,9 @@ int main() {
         static uint32_t last_print_ms = 0;
         if (board_millis() - last_print_ms > 2000) {
             last_print_ms = board_millis();
-            debug_puts("DEBUG: Main loop is alive.\r\n");
+            char debug_str[50];
+            sprintf(debug_str, "DEBUG: Main loop alive. Mounted = %d\r\n", tud_mounted());
+            debug_puts(debug_str);
         }
         // --- DEBUG END ---
     }
