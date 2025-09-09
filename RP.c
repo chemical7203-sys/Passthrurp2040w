@@ -38,11 +38,6 @@ void setup_uart() {
     gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
 }
-
-// Function to send a debug string over the main UART channel (uart1)
-void debug_puts(const char *s) {
-    uart_puts(UART_ID, s);
-}
 void process_uart() {
     // Expecting a 23-byte packet: 1 header + 21 payload + 1 checksum
     static uint8_t pb[23];
@@ -198,27 +193,11 @@ int main() {
     board_init();
     setup_uart();
     tusb_init();
-
-    // --- DEBUG START ---
-    // Use a buffer to format the string for the debug output
-    char debug_str[50];
-    sprintf(debug_str, "DEBUG: sizeof(hid_ds4_report_t) = %u\r\n", (unsigned int)sizeof(hid_ds4_report_t));
-    debug_puts(debug_str);
-    // --- DEBUG END ---
-
     while (true) {
         tud_task();
         hid_task();
         process_uart();
         debug_task();
-
-        // --- DEBUG START ---
-        static uint32_t last_print_ms = 0;
-        if (board_millis() - last_print_ms > 2000) {
-            last_print_ms = board_millis();
-            debug_puts("DEBUG: Main loop is alive.\r\n");
-        }
-        // --- DEBUG END ---
     }
     return 0;
 }

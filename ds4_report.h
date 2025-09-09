@@ -86,5 +86,5 @@ typedef struct __attribute__((packed)) {
   uint8_t  extended_data;
   uint8_t  reserved2[2];
   TouchpadData touchpad;
-  uint8_t  reserved3[20];
+  uint8_t  reserved3[23]; // Padded from 20 to 23 to make total size 64
 } hid_ds4_report_t;
