@@ -17,9 +17,8 @@
 // Struct to hold the received v2 controller data from UART
 typedef struct __attribute__((packed)) {
     uint16_t buttons;
-    int8_t   lx, ly;
+    int8_t   lx, ly, rx, ry;
     uint8_t  l2, r2;
-    int8_t   rx, ry;
     uint8_t  dpad;
     int16_t  accel_x, accel_y, accel_z;
     int16_t  gyro_x, gyro_y, gyro_z;
@@ -38,6 +37,11 @@ void setup_uart() {
     uart_init(UART_ID, BAUD_RATE);
     gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
+}
+
+// Function to send a debug string over the main UART channel (uart1)
+void debug_puts(const char *s) {
+    uart_puts(UART_ID, s);
 }
 void process_uart() {
     // Expecting a 23-byte packet: 1 header + 21 payload + 1 checksum
@@ -106,7 +110,11 @@ uint8_t dpad_to_switch_hat(uint8_t dpad_mask) {
     return hat_map[dpad_mask & 0x0F];
 }
 #elif CFG_TUD_HID_SONY
-// dpad_to_generic_hat removed, as it's no longer used.
+// We are using a generic gamepad report, so we need a generic hat conversion.
+uint8_t dpad_to_generic_hat(uint8_t dpad_mask) {
+    static const uint8_t hat_map[16] = { 8, 0, 4, 8, 6, 7, 5, 8, 2, 1, 3, 8, 8, 8, 8, 8 };
+    return hat_map[dpad_mask & 0x0F];
+}
 #else // For Generic
 uint8_t dpad_to_generic_hat(uint8_t dpad_mask) {
     static const uint8_t hat_map[16] = { 8, 0, 4, 8, 6, 7, 5, 8, 2, 1, 3, 8, 8, 8, 8, 8 };
@@ -154,48 +162,17 @@ void hid_task(void) {
 
       tud_hid_report(0, &report, sizeof(report));
     #elif CFG_TUD_HID_SONY
-      // Build and send a full DS4 report
-      hid_ds4_report_t report = {0};
+      // Create and send a standard HID gamepad report
+      hid_gamepad_report_t report = {0};
+      report.x = gamepad_data.lx;
+      report.y = gamepad_data.ly;
+      report.rx = gamepad_data.rx;
+      report.ry = gamepad_data.ry;
+      report.z = gamepad_data.l2;
+      report.rz = gamepad_data.r2;
+      report.hat = dpad_to_generic_hat(gamepad_data.dpad);
+      report.buttons = gamepad_data.buttons;
 
-      report.report_id = 0x01;
-
-      // Analog sticks - convert from int8 to uint8
-      report.left_stick_x = gamepad_data.lx + 128;
-      report.left_stick_y = gamepad_data.ly + 128;
-      report.right_stick_x = gamepad_data.rx + 128;
-      report.right_stick_y = gamepad_data.ry + 128;
-
-      // Analog triggers
-      report.l2_trigger = gamepad_data.l2;
-      report.r2_trigger = gamepad_data.r2;
-
-      // D-Pad - fix rotational bug
-      // True state = (received state + 1) % 9.
-      report.dpad = (gamepad_data.dpad + 1) % 9;
-
-      // Buttons - map from gamepad_data.buttons to the bitfield
-      // User reported buttons work, so assuming a direct mapping is fine.
-      // PS4 bit order: 0:Circle, 1:Cross, 2:Square, 3:Triangle
-      report.circle = (gamepad_data.buttons >> 0) & 1;
-      report.cross = (gamepad_data.buttons >> 1) & 1;
-      report.square = (gamepad_data.buttons >> 2) & 1;
-      report.triangle = (gamepad_data.buttons >> 3) & 1;
-      report.l1 = (gamepad_data.buttons >> 4) & 1;
-      report.r1 = (gamepad_data.buttons >> 5) & 1;
-      report.l2 = (gamepad_data.buttons >> 6) & 1;
-      report.r2 = (gamepad_data.buttons >> 7) & 1;
-      report.share = (gamepad_data.buttons >> 8) & 1;
-      report.options = (gamepad_data.buttons >> 9) & 1;
-      report.l3 = (gamepad_data.buttons >> 10) & 1;
-      report.r3 = (gamepad_data.buttons >> 11) & 1;
-      report.ps = (gamepad_data.buttons >> 12) & 1;
-      report.tpad_click = (gamepad_data.buttons >> 13) & 1;
-
-      // Report counter - just increment
-      static uint8_t ds4_report_counter = 0;
-      report.report_counter = ds4_report_counter++;
-
-      // Send the report. Report ID is 1.
       tud_hid_report(1, &report, sizeof(report));
     #else // GENERIC
       hid_gamepad_report_t report = {0};
@@ -221,11 +198,27 @@ int main() {
     board_init();
     setup_uart();
     tusb_init();
+
+    // --- DEBUG START ---
+    // Use a buffer to format the string for the debug output
+    char debug_str[50];
+    sprintf(debug_str, "DEBUG: sizeof(hid_ds4_report_t) = %u\r\n", (unsigned int)sizeof(hid_ds4_report_t));
+    debug_puts(debug_str);
+    // --- DEBUG END ---
+
     while (true) {
         tud_task();
         hid_task();
         process_uart();
         debug_task();
+
+        // --- DEBUG START ---
+        static uint32_t last_print_ms = 0;
+        if (board_millis() - last_print_ms > 2000) {
+            last_print_ms = board_millis();
+            debug_puts("DEBUG: Main loop is alive.\r\n");
+        }
+        // --- DEBUG END ---
     }
     return 0;
 }
