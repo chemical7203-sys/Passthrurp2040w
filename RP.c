@@ -38,6 +38,23 @@ void setup_uart() {
     gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
 }
+
+// Function to send a debug string over the main UART channel (uart1)
+void debug_puts(const char *s) {
+    uart_puts(UART_ID, s);
+}
+// Helper to print a buffer as a hex string
+void print_buf_hex(const uint8_t* buf, size_t len) {
+    char hex_str[3 * len + 5]; // +5 for "RAW: " and null terminator
+    strcpy(hex_str, "RAW: ");
+    for (size_t i = 0; i < len; ++i) {
+        sprintf(hex_str + 5 + 3 * i, "%02X ", buf[i]);
+    }
+    hex_str[5 + 3 * len] = '\0';
+    debug_puts(hex_str);
+    debug_puts("\r\n");
+}
+
 void process_uart() {
     // Expecting a 23-byte packet: 1 header + 21 payload + 1 checksum
     static uint8_t pb[23];
@@ -51,14 +68,31 @@ void process_uart() {
         } else {
             pb[idx++] = ch;
             if (idx >= 23) {
+                debug_puts("--- UART Packet Received ---\r\n");
+                print_buf_hex(pb, 23);
+
                 uint8_t cs = 0;
                 // Checksum is now over the header and the 21-byte payload
                 for (int i = 0; i < 22; i++) {
                     cs ^= pb[i];
                 }
+
                 if (cs == pb[22]) {
+                    debug_puts("DEBUG: Checksum OK.\r\n");
                     // Copy the 21-byte payload into the struct
                     memcpy(&gamepad_data, &pb[1], sizeof(gamepad_data));
+
+                    // Print parsed data
+                    char debug_str[100];
+                    sprintf(debug_str, "DEBUG: Parsed sticks (LX,LY,RX,RY): %d,%d,%d,%d\r\n", gamepad_data.lx, gamepad_data.ly, gamepad_data.rx, gamepad_data.ry);
+                    debug_puts(debug_str);
+                    sprintf(debug_str, "DEBUG: Parsed triggers (L2,R2): %u,%u\r\n", gamepad_data.l2, gamepad_data.r2);
+                    debug_puts(debug_str);
+                    sprintf(debug_str, "DEBUG: Parsed dpad: %u\r\n", gamepad_data.dpad);
+                    debug_puts(debug_str);
+
+                } else {
+                    debug_puts("DEBUG: Checksum FAILED.\r\n");
                 }
                 idx = 0;
             }
@@ -193,11 +227,27 @@ int main() {
     board_init();
     setup_uart();
     tusb_init();
+
+    // --- DEBUG START ---
+    // Use a buffer to format the string for the debug output
+    char debug_str[50];
+    sprintf(debug_str, "DEBUG: sizeof(hid_ds4_report_t) = %u\r\n", (unsigned int)sizeof(hid_ds4_report_t));
+    debug_puts(debug_str);
+    // --- DEBUG END ---
+
     while (true) {
         tud_task();
         hid_task();
         process_uart();
         debug_task();
+
+        // --- DEBUG START ---
+        static uint32_t last_print_ms = 0;
+        if (board_millis() - last_print_ms > 2000) {
+            last_print_ms = board_millis();
+            debug_puts("DEBUG: Main loop is alive.\r\n");
+        }
+        // --- DEBUG END ---
     }
     return 0;
 }
