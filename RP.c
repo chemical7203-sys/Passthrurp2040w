@@ -96,13 +96,17 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
 }
 
 #if CFG_TUD_HID_NINTENDO
-// dpad_to_switch_hat removed, rotational fix is implemented directly.
-#elif CFG_TUD_HID_SONY
-// We are using a generic gamepad report, so we need a generic hat conversion.
-uint8_t dpad_to_generic_hat(uint8_t dpad_mask) {
-    static const uint8_t hat_map[16] = { 8, 0, 4, 8, 6, 7, 5, 8, 2, 1, 3, 8, 8, 8, 8, 8 };
+uint8_t dpad_to_switch_hat(uint8_t dpad_mask) {
+    static const uint8_t hat_map[16] = {
+        SWITCH_HAT_NOTHING, SWITCH_HAT_UP, SWITCH_HAT_DOWN, SWITCH_HAT_NOTHING,
+        SWITCH_HAT_LEFT, SWITCH_HAT_UPLEFT, SWITCH_HAT_DOWNLEFT, SWITCH_HAT_NOTHING,
+        SWITCH_HAT_RIGHT, SWITCH_HAT_UPRIGHT, SWITCH_HAT_DOWNRIGHT, SWITCH_HAT_NOTHING,
+        SWITCH_HAT_NOTHING, SWITCH_HAT_NOTHING, SWITCH_HAT_NOTHING, SWITCH_HAT_NOTHING
+    };
     return hat_map[dpad_mask & 0x0F];
 }
+#elif CFG_TUD_HID_SONY
+// dpad_to_generic_hat removed, as it's no longer used.
 #else // For Generic
 uint8_t dpad_to_generic_hat(uint8_t dpad_mask) {
     static const uint8_t hat_map[16] = { 8, 0, 4, 8, 6, 7, 5, 8, 2, 1, 3, 8, 8, 8, 8, 8 };
@@ -124,10 +128,10 @@ void hid_task(void) {
 
       // Button mapping uses direct 1-to-1 logic.
       // The padding fix should resolve any data corruption issues.
-      if (gamepad_data.buttons & (1 << 1)) report.buttons |= SWITCH_MASK_B;
-      if (gamepad_data.buttons & (1 << 0)) report.buttons |= SWITCH_MASK_A;
-      if (gamepad_data.buttons & (1 << 3)) report.buttons |= SWITCH_MASK_Y;
-      if (gamepad_data.buttons & (1 << 2)) report.buttons |= SWITCH_MASK_X;
+      if (gamepad_data.buttons & (1 << 1)) report.buttons |= SWITCH_MASK_A;
+      if (gamepad_data.buttons & (1 << 0)) report.buttons |= SWITCH_MASK_B;
+      if (gamepad_data.buttons & (1 << 3)) report.buttons |= SWITCH_MASK_X;
+      if (gamepad_data.buttons & (1 << 2)) report.buttons |= SWITCH_MASK_Y;
       if (gamepad_data.buttons & (1 << 4)) report.buttons |= SWITCH_MASK_L;
       if (gamepad_data.buttons & (1 << 5)) report.buttons |= SWITCH_MASK_R;
       if (gamepad_data.l2 > 30) report.buttons |= SWITCH_MASK_ZL;
@@ -140,9 +144,7 @@ void hid_task(void) {
       if (gamepad_data.buttons & (1 << 13)) report.buttons |= SWITCH_MASK_CAPTURE;
 
       // D-pad
-      // Fix D-pad rotational bug. The received value is off by -1.
-      // True state = (received state + 1) % 9.
-      report.hat = (gamepad_data.dpad + 1) % 9;
+      report.hat = dpad_to_switch_hat(gamepad_data.dpad);
 
       // Analog sticks
       report.lx = gamepad_data.lx + 128;
@@ -152,17 +154,48 @@ void hid_task(void) {
 
       tud_hid_report(0, &report, sizeof(report));
     #elif CFG_TUD_HID_SONY
-      // Create and send a standard HID gamepad report
-      hid_gamepad_report_t report = {0};
-      report.x = gamepad_data.lx;
-      report.y = gamepad_data.ly;
-      report.rx = gamepad_data.rx;
-      report.ry = gamepad_data.ry;
-      report.z = gamepad_data.l2;
-      report.rz = gamepad_data.r2;
-      report.hat = dpad_to_generic_hat(gamepad_data.dpad);
-      report.buttons = gamepad_data.buttons;
+      // Build and send a full DS4 report
+      hid_ds4_report_t report = {0};
 
+      report.report_id = 0x01;
+
+      // Analog sticks - convert from int8 to uint8
+      report.left_stick_x = gamepad_data.lx + 128;
+      report.left_stick_y = gamepad_data.ly + 128;
+      report.right_stick_x = gamepad_data.rx + 128;
+      report.right_stick_y = gamepad_data.ry + 128;
+
+      // Analog triggers
+      report.l2_trigger = gamepad_data.l2;
+      report.r2_trigger = gamepad_data.r2;
+
+      // D-Pad - fix rotational bug
+      // True state = (received state + 1) % 9.
+      report.dpad = (gamepad_data.dpad + 1) % 9;
+
+      // Buttons - map from gamepad_data.buttons to the bitfield
+      // User reported buttons work, so assuming a direct mapping is fine.
+      // PS4 bit order: 0:Circle, 1:Cross, 2:Square, 3:Triangle
+      report.circle = (gamepad_data.buttons >> 0) & 1;
+      report.cross = (gamepad_data.buttons >> 1) & 1;
+      report.square = (gamepad_data.buttons >> 2) & 1;
+      report.triangle = (gamepad_data.buttons >> 3) & 1;
+      report.l1 = (gamepad_data.buttons >> 4) & 1;
+      report.r1 = (gamepad_data.buttons >> 5) & 1;
+      report.l2 = (gamepad_data.buttons >> 6) & 1;
+      report.r2 = (gamepad_data.buttons >> 7) & 1;
+      report.share = (gamepad_data.buttons >> 8) & 1;
+      report.options = (gamepad_data.buttons >> 9) & 1;
+      report.l3 = (gamepad_data.buttons >> 10) & 1;
+      report.r3 = (gamepad_data.buttons >> 11) & 1;
+      report.ps = (gamepad_data.buttons >> 12) & 1;
+      report.tpad_click = (gamepad_data.buttons >> 13) & 1;
+
+      // Report counter - just increment
+      static uint8_t ds4_report_counter = 0;
+      report.report_counter = ds4_report_counter++;
+
+      // Send the report. Report ID is 1.
       tud_hid_report(1, &report, sizeof(report));
     #else // GENERIC
       hid_gamepad_report_t report = {0};
