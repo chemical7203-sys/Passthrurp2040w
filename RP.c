@@ -68,9 +68,6 @@ void process_uart() {
         } else {
             pb[idx++] = ch;
             if (idx >= 23) {
-                debug_puts("--- UART Packet Received ---\r\n");
-                print_buf_hex(pb, 23);
-
                 uint8_t cs = 0;
                 // Checksum is now over the header and the 21-byte payload
                 for (int i = 0; i < 22; i++) {
@@ -78,20 +75,29 @@ void process_uart() {
                 }
 
                 if (cs == pb[22]) {
-                    debug_puts("DEBUG: Checksum OK.\r\n");
-                    // Copy the 21-byte payload into the struct
+                    // Always copy data if checksum is ok
                     memcpy(&gamepad_data, &pb[1], sizeof(gamepad_data));
 
-                    // Print parsed data
-                    char debug_str[100];
-                    sprintf(debug_str, "DEBUG: Parsed sticks (LX,LY,RX,RY): %d,%d,%d,%d\r\n", gamepad_data.lx, gamepad_data.ly, gamepad_data.rx, gamepad_data.ry);
-                    debug_puts(debug_str);
-                    sprintf(debug_str, "DEBUG: Parsed triggers (L2,R2): %u,%u\r\n", gamepad_data.l2, gamepad_data.r2);
-                    debug_puts(debug_str);
-                    sprintf(debug_str, "DEBUG: Parsed dpad: %u\r\n", gamepad_data.dpad);
-                    debug_puts(debug_str);
+                    // --- Throttle debug printing to every 500ms ---
+                    static uint32_t last_uart_debug_ms = 0;
+                    if (board_millis() - last_uart_debug_ms > 500) {
+                        last_uart_debug_ms = board_millis();
 
+                        debug_puts("--- UART Packet Snapshot ---\r\n");
+                        print_buf_hex(pb, 23);
+                        debug_puts("DEBUG: Checksum OK.\r\n");
+
+                        // Print parsed data from the now-updated gamepad_data
+                        char debug_str[100];
+                        sprintf(debug_str, "DEBUG: Parsed sticks (LX,LY,RX,RY): %d,%d,%d,%d\r\n", gamepad_data.lx, gamepad_data.ly, gamepad_data.rx, gamepad_data.ry);
+                        debug_puts(debug_str);
+                        sprintf(debug_str, "DEBUG: Parsed triggers (L2,R2): %u,%u\r\n", gamepad_data.l2, gamepad_data.r2);
+                        debug_puts(debug_str);
+                        sprintf(debug_str, "DEBUG: Parsed dpad: %u\r\n", gamepad_data.dpad);
+                        debug_puts(debug_str);
+                    }
                 } else {
+                    // Only print checksum fails if they happen, as they should be rare
                     debug_puts("DEBUG: Checksum FAILED.\r\n");
                 }
                 idx = 0;
