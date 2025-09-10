@@ -46,11 +46,16 @@ void debug_puts(const char *s) {
 }
 // Helper to print a buffer as a hex string
 void print_buf_hex(const uint8_t* buf, size_t len) {
-    char hex_str[3 * len + 5]; // +5 for "RAW: " and null terminator
+    // Fixed buffer overflow warning: size is now 3*len for hex chars,
+    // 5 for "RAW: ", and 1 for the null terminator.
+    char hex_str[3 * len + 6];
     strcpy(hex_str, "RAW: ");
     for (size_t i = 0; i < len; ++i) {
         sprintf(hex_str + 5 + 3 * i, "%02X ", buf[i]);
     }
+    // The last sprintf writes a space, so we can overwrite it with the null terminator
+    // if we don't want a trailing space. Or just leave it.
+    // The original out-of-bounds write is now fixed by the larger buffer.
     hex_str[5 + 3 * len] = '\0';
     debug_puts(hex_str);
     debug_puts("\r\n");
@@ -115,10 +120,15 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_t
   (void) buffer;
   (void) reqlen;
 
-  char debug_str[100];
-  sprintf(debug_str, "DEBUG GET_REPORT: id=%02x, type=%d\r\n", report_id, report_type);
+  char debug_str[128];
+  debug_puts("\r\n--- tud_hid_get_report_cb ---\r\n");
+  sprintf(debug_str, "Instance: %u, Report ID: %02X, Report Type: %d, Req Len: %u\r\n",
+          instance, report_id, report_type, reqlen);
   debug_puts(debug_str);
+  debug_puts("STALLing GET_REPORT request (returning 0)\r\n");
+  debug_puts("---------------------------\r\n");
 
+  // Returning 0 causes a STALL, which is the default behavior for unhandled reports.
   return 0;
 }
 
@@ -127,11 +137,14 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_t
 void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize) {
   (void) instance;
 
-  char debug_str[100];
-  sprintf(debug_str, "DEBUG SET_REPORT: id=%02x, type=%d, size=%u\r\n", report_id, report_type, bufsize);
+  char debug_str[128];
+  debug_puts("\r\n--- tud_hid_set_report_cb ---\r\n");
+  sprintf(debug_str, "Instance: %u, Report ID: %02X, Report Type: %d, Bufsize: %u\r\n",
+          instance, report_id, report_type, bufsize);
   debug_puts(debug_str);
-  debug_puts("DEBUG SET_REPORT: Host sent data:\r\n");
+  debug_puts("Host sent data buffer:\r\n");
   print_buf_hex(buffer, bufsize);
+  debug_puts("---------------------------\r\n");
 }
 
 #if CFG_TUD_HID_NINTENDO
@@ -226,24 +239,23 @@ void hid_task(void) {
       report.report_counter = ds4_report_counter++;
 
       // --- DEBUG: Check endpoint status and memory integrity before sending ---
-      bool ep_in_busy = tud_hid_n_ep_busy(0, TUD_DIR_IN);
       bool success = false;
 
       if (should_print_debug) {
           char debug_str[100];
-          sprintf(debug_str, "DEBUG HID: tud_hid_ready()=%d, ep_busy=%d\r\n", tud_hid_ready(), ep_in_busy);
+          sprintf(debug_str, "DEBUG HID: tud_hid_ready()=%d. Attempting to send report...\r\n", tud_hid_ready());
           debug_puts(debug_str);
-          sprintf(debug_str, "DEBUG HID: Pre-send dpad value = %u\r\n", report.dpad);
-          debug_puts(debug_str);
+          debug_puts("Report data to be sent:\r\n");
+          print_buf_hex((uint8_t*)&report, sizeof(report));
       }
 
-      if (!ep_in_busy) {
-        success = tud_hid_report(1, &report, sizeof(report));
-      }
+      // The report ID is in the report struct itself, so the first param is 0.
+      // This is being tested to see what the host's reaction is.
+      success = tud_hid_report(0, &report, sizeof(report));
 
       if (should_print_debug) {
           char debug_str[50];
-          sprintf(debug_str, "DEBUG HID: tud_hid_report() success = %d\r\n", success);
+          sprintf(debug_str, "DEBUG HID: tud_hid_report() success = %d\r\n\r\n", success);
           debug_puts(debug_str);
       }
       // --- DEBUG END ---
