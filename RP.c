@@ -209,21 +209,35 @@ void hid_task(void) {
       report.l2_trigger = gamepad_data.l2;
       report.r2_trigger = gamepad_data.r2;
 
-      // D-Pad - fix rotational bug and out-of-range value
-      uint8_t dpad_in = gamepad_data.dpad;
-      // The (dpad + 1) % 9 logic incorrectly maps the neutral value 8 to 0 (UP).
-      // Handle neutral dpad state (8) as a special case to prevent this.
-      if (dpad_in == 8) {
-        // Use the neutral value from the passinglink reference project.
-        report.dpad = 15;
-      } else {
-        // It's a direction, apply the rotation fix.
-        report.dpad = (dpad_in + 1) % 9;
-      }
+      // D-Pad: The GUI sends a bitmask (U=1, D=2, L=4, R=8).
+      // The firmware needs to convert this to the DS4 HAT values (0-7 for directions, 15 for neutral).
+      // A lookup table is the cleanest way to do this conversion.
+      static const uint8_t dpad_map[16] = {
+        15, // 0000: Neutral
+        0,  // 0001: Up
+        4,  // 0010: Down
+        15, // 0011: Up|Down -> Invalid, treat as neutral
+        6,  // 0100: Left
+        7,  // 0101: Up|Left
+        5,  // 0110: Down|Left
+        15, // 0111: Up|Down|Left -> Invalid
+        2,  // 1000: Right
+        1,  // 1001: Up|Right
+        3,  // 1010: Down|Right
+        15, // 1011: Up|Down|Right -> Invalid
+        15, // 1100: Left|Right -> Invalid
+        15, // 1101: Up|Left|Right -> Invalid
+        15, // 1110: Down|Left|Right -> Invalid
+        15  // 1111: All -> Invalid
+      };
+      uint8_t dpad_mask = gamepad_data.dpad & 0x0F;
+      report.dpad = dpad_map[dpad_mask];
 
       // Buttons
-      report.circle = (gamepad_data.buttons >> 0) & 1;
-      report.cross = (gamepad_data.buttons >> 1) & 1;
+      // User reported that Circle and Cross were swapped.
+      // Assuming bit 0 is Cross and bit 1 is Circle from the input.
+      report.cross = (gamepad_data.buttons >> 0) & 1;
+      report.circle = (gamepad_data.buttons >> 1) & 1;
       report.square = (gamepad_data.buttons >> 2) & 1;
       report.triangle = (gamepad_data.buttons >> 3) & 1;
       report.l1 = (gamepad_data.buttons >> 4) & 1;
