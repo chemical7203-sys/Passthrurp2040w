@@ -29,6 +29,9 @@ static gamepad_data_v2_t gamepad_data;
 static uint8_t report_counter = 0;
 static hid_ds4_report_t last_sent_report; // For debugging raw report bytes
 
+// --- Non-intrusive debug counters ---
+static uint32_t checksum_fail_count = 0;
+
 #define UART_ID uart1
 #define BAUD_RATE 115200
 #define UART_TX_PIN 4
@@ -46,68 +49,60 @@ void debug_puts(const char *s) {
 }
 // Helper to print a buffer as a hex string
 void print_buf_hex(const uint8_t* buf, size_t len) {
-    // Fixed buffer overflow warning: size is now 3*len for hex chars,
-    // 5 for "RAW: ", and 1 for the null terminator.
-    char hex_str[3 * len + 6];
+    char hex_str[3 * len + 5]; // +5 for "RAW: " and null terminator
     strcpy(hex_str, "RAW: ");
     for (size_t i = 0; i < len; ++i) {
         sprintf(hex_str + 5 + 3 * i, "%02X ", buf[i]);
     }
-    // The last sprintf writes a space, so we can overwrite it with the null terminator
-    // if we don't want a trailing space. Or just leave it.
-    // The original out-of-bounds write is now fixed by the larger buffer.
     hex_str[5 + 3 * len] = '\0';
     debug_puts(hex_str);
     debug_puts("\r\n");
 }
 
 void process_uart() {
+    // Expecting a 23-byte packet: 1 header + 21 payload + 1 checksum
     static uint8_t pb[23];
     static uint8_t idx = 0;
-
     while (uart_is_readable(UART_ID)) {
         uint8_t ch = uart_getc(UART_ID);
-
-        // This is a state machine to robustly find the packet header.
-        // State 0: Searching for header (idx == 0)
         if (idx == 0) {
             if (ch == 0xA6) {
-                pb[0] = ch;
-                idx = 1;
+                pb[idx++] = ch;
             }
-            // If ch is not the header, we do nothing and effectively discard the byte,
-            // staying in state 0 and waiting for a real header.
-        }
-        // State 1: Receiving payload (idx > 0)
-        else {
-            pb[idx] = ch;
-            idx++;
-
-            // If we have a full packet, process it.
+        } else {
+            pb[idx++] = ch;
             if (idx >= 23) {
                 uint8_t cs = 0;
-                // Checksum is over the header and the 21-byte payload.
+                // Checksum is now over the header and the 21-byte payload
                 for (int i = 0; i < 22; i++) {
                     cs ^= pb[i];
                 }
 
                 if (cs == pb[22]) {
+                    // Always copy data if checksum is ok
                     memcpy(&gamepad_data, &pb[1], sizeof(gamepad_data));
-                    // Log the parsed data for every valid packet to see if it's correct.
-                    debug_puts("DEBUG: Checksum OK. Parsed data:\r\n");
-                    char debug_str[100];
-                    sprintf(debug_str, "  Sticks (LX,LY,RX,RY): %d,%d,%d,%d\r\n", gamepad_data.lx, gamepad_data.ly, gamepad_data.rx, gamepad_data.ry);
-                    debug_puts(debug_str);
-                    sprintf(debug_str, "  Triggers (L2,R2): %u,%u\r\n", gamepad_data.l2, gamepad_data.r2);
-                    debug_puts(debug_str);
-                    sprintf(debug_str, "  DPAD: %u, Buttons: %04X\r\n", gamepad_data.dpad, gamepad_data.buttons);
-                    debug_puts(debug_str);
-                } else {
-                    debug_puts("DEBUG: Checksum FAILED. RAW packet:\r\n");
-                    print_buf_hex(pb, 23);
-                }
 
-                // Reset to state 0 to search for the next header.
+                    // --- Throttle debug printing to every 500ms ---
+                    static uint32_t last_uart_debug_ms = 0;
+                    if (board_millis() - last_uart_debug_ms > 500) {
+                        last_uart_debug_ms = board_millis();
+
+                        debug_puts("--- UART Packet Snapshot ---\r\n");
+                        print_buf_hex(pb, 23);
+                        debug_puts("DEBUG: Checksum OK.\r\n");
+
+                        // Print parsed data from the now-updated gamepad_data
+                        char debug_str[100];
+                        sprintf(debug_str, "DEBUG: Parsed sticks (LX,LY,RX,RY): %d,%d,%d,%d\r\n", gamepad_data.lx, gamepad_data.ly, gamepad_data.rx, gamepad_data.ry);
+                        debug_puts(debug_str);
+                        sprintf(debug_str, "DEBUG: Parsed triggers (L2,R2): %u,%u\r\n", gamepad_data.l2, gamepad_data.r2);
+                        debug_puts(debug_str);
+                        sprintf(debug_str, "DEBUG: Parsed dpad: %u\r\n", gamepad_data.dpad);
+                        debug_puts(debug_str);
+                    }
+                } else {
+                    checksum_fail_count++;
+                }
                 idx = 0;
             }
         }
@@ -122,15 +117,10 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_t
   (void) buffer;
   (void) reqlen;
 
-  char debug_str[128];
-  debug_puts("\r\n--- tud_hid_get_report_cb ---\r\n");
-  sprintf(debug_str, "Instance: %u, Report ID: %02X, Report Type: %d, Req Len: %u\r\n",
-          instance, report_id, report_type, reqlen);
+  char debug_str[100];
+  sprintf(debug_str, "DEBUG GET_REPORT: id=%02x, type=%d\r\n", report_id, report_type);
   debug_puts(debug_str);
-  debug_puts("STALLing GET_REPORT request (returning 0)\r\n");
-  debug_puts("---------------------------\r\n");
 
-  // Returning 0 causes a STALL, which is the default behavior for unhandled reports.
   return 0;
 }
 
@@ -139,14 +129,11 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_t
 void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize) {
   (void) instance;
 
-  char debug_str[128];
-  debug_puts("\r\n--- tud_hid_set_report_cb ---\r\n");
-  sprintf(debug_str, "Instance: %u, Report ID: %02X, Report Type: %d, Bufsize: %u\r\n",
-          instance, report_id, report_type, bufsize);
+  char debug_str[100];
+  sprintf(debug_str, "DEBUG SET_REPORT: id=%02x, type=%d, size=%u\r\n", report_id, report_type, bufsize);
   debug_puts(debug_str);
-  debug_puts("Host sent data buffer:\r\n");
+  debug_puts("DEBUG SET_REPORT: Host sent data:\r\n");
   print_buf_hex(buffer, bufsize);
-  debug_puts("---------------------------\r\n");
 }
 
 #if CFG_TUD_HID_NINTENDO
@@ -213,12 +200,15 @@ void hid_task(void) {
       report.r2_trigger = gamepad_data.r2;
 
       // D-Pad - fix rotational bug and out-of-range value
-      uint8_t corrected_dpad = (gamepad_data.dpad + 1) % 9;
-      if (corrected_dpad == 8) { // 8 is standard neutral, but descriptor max is 7
-        // Let's test the standard neutral value '8' instead of '15' to see if it fixes the stuck DPAD issue.
-        report.dpad = 8;
+      uint8_t dpad_in = gamepad_data.dpad;
+      // The (dpad + 1) % 9 logic incorrectly maps the neutral value 8 to 0 (UP).
+      // Handle neutral dpad state (8) as a special case to prevent this.
+      if (dpad_in == 8) {
+        // Use the neutral value from the passinglink reference project.
+        report.dpad = 15;
       } else {
-        report.dpad = corrected_dpad;
+        // It's a direction, apply the rotation fix.
+        report.dpad = (dpad_in + 1) % 9;
       }
 
       // Buttons
@@ -242,26 +232,31 @@ void hid_task(void) {
       report.report_counter = ds4_report_counter++;
 
       // --- DEBUG: Check endpoint status and memory integrity before sending ---
+      bool ep_in_busy = tud_hid_n_ep_busy(0, TUD_DIR_IN);
       bool success = false;
 
       if (should_print_debug) {
           char debug_str[100];
-          sprintf(debug_str, "DEBUG HID: tud_hid_ready()=%d. Attempting to send report...\r\n", tud_hid_ready());
+          static uint32_t last_fail_count = 0;
+          if (checksum_fail_count > last_fail_count) {
+              sprintf(debug_str, "DEBUG: UART checksum failures detected. Total fails: %lu\r\n", checksum_fail_count);
+              debug_puts(debug_str);
+              last_fail_count = checksum_fail_count;
+          }
+
+          sprintf(debug_str, "DEBUG HID: tud_hid_ready()=%d, ep_busy=%d\r\n", tud_hid_ready(), ep_in_busy);
           debug_puts(debug_str);
-          // Log the final dpad value being sent
-          sprintf(debug_str, "  Final DPAD value being sent: %u\r\n", report.dpad);
+          sprintf(debug_str, "DEBUG HID: Pre-send dpad value = %u\r\n", report.dpad);
           debug_puts(debug_str);
-          debug_puts("Report data to be sent:\r\n");
-          print_buf_hex((uint8_t*)&report, sizeof(report));
       }
 
-      // The report ID is in the report struct itself, so the first param is 0.
-      // This is being tested to see what the host's reaction is.
-      success = tud_hid_report(0, &report, sizeof(report));
+      if (!ep_in_busy) {
+        success = tud_hid_report(1, &report, sizeof(report));
+      }
 
       if (should_print_debug) {
           char debug_str[50];
-          sprintf(debug_str, "DEBUG HID: tud_hid_report() success = %d\r\n\r\n", success);
+          sprintf(debug_str, "DEBUG HID: tud_hid_report() success = %d\r\n", success);
           debug_puts(debug_str);
       }
       // --- DEBUG END ---
