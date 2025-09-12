@@ -62,50 +62,44 @@ void print_buf_hex(const uint8_t* buf, size_t len) {
 }
 
 void process_uart() {
-    // Expecting a 23-byte packet: 1 header + 21 payload + 1 checksum
     static uint8_t pb[23];
     static uint8_t idx = 0;
+
     while (uart_is_readable(UART_ID)) {
         uint8_t ch = uart_getc(UART_ID);
+
+        // This is a state machine to robustly find the packet header.
+        // State 0: Searching for header (idx == 0)
         if (idx == 0) {
             if (ch == 0xA6) {
-                pb[idx++] = ch;
+                pb[0] = ch;
+                idx = 1;
             }
-        } else {
-            pb[idx++] = ch;
+            // If ch is not the header, we do nothing and effectively discard the byte,
+            // staying in state 0 and waiting for a real header.
+        }
+        // State 1: Receiving payload (idx > 0)
+        else {
+            pb[idx] = ch;
+            idx++;
+
+            // If we have a full packet, process it.
             if (idx >= 23) {
                 uint8_t cs = 0;
-                // Checksum is now over the header and the 21-byte payload
+                // Checksum is over the header and the 21-byte payload.
                 for (int i = 0; i < 22; i++) {
                     cs ^= pb[i];
                 }
 
                 if (cs == pb[22]) {
-                    // Always copy data if checksum is ok
                     memcpy(&gamepad_data, &pb[1], sizeof(gamepad_data));
-
-                    // --- Throttle debug printing to every 500ms ---
-                    static uint32_t last_uart_debug_ms = 0;
-                    if (board_millis() - last_uart_debug_ms > 500) {
-                        last_uart_debug_ms = board_millis();
-
-                        debug_puts("--- UART Packet Snapshot ---\r\n");
-                        print_buf_hex(pb, 23);
-                        debug_puts("DEBUG: Checksum OK.\r\n");
-
-                        // Print parsed data from the now-updated gamepad_data
-                        char debug_str[100];
-                        sprintf(debug_str, "DEBUG: Parsed sticks (LX,LY,RX,RY): %d,%d,%d,%d\r\n", gamepad_data.lx, gamepad_data.ly, gamepad_data.rx, gamepad_data.ry);
-                        debug_puts(debug_str);
-                        sprintf(debug_str, "DEBUG: Parsed triggers (L2,R2): %u,%u\r\n", gamepad_data.l2, gamepad_data.r2);
-                        debug_puts(debug_str);
-                        sprintf(debug_str, "DEBUG: Parsed dpad: %u\r\n", gamepad_data.dpad);
-                        debug_puts(debug_str);
-                    }
+                    // Optional: Add a "Checksum OK" log here if needed for debugging.
                 } else {
-                    // Only print checksum fails if they happen, as they should be rare
-                    debug_puts("DEBUG: Checksum FAILED.\r\n");
+                    // Optional: Add a "Checksum FAILED" log here.
+                    // This is less critical now, as the receiver will self-synchronize.
                 }
+
+                // Reset to state 0 to search for the next header.
                 idx = 0;
             }
         }
