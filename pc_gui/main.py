@@ -4,7 +4,6 @@ from PyQt6.QtCore import QTimer
 from gamepad_ui import GamepadUI, GamepadSignals
 from ds4_handler import DS4Handler
 from serial_handler import SerialHandler
-# device_manager is no longer needed
 from queue import Queue
 
 class MainApplication:
@@ -55,7 +54,6 @@ class MainApplication:
         self.gamepad_signals.button_event.connect(self.ui.gamepad_widget.update_button)
         self.gamepad_signals.trigger_event.connect(self.ui.gamepad_widget.update_trigger)
         self.gamepad_signals.gamepad_disconnected.connect(self.handle_gamepad_disconnect)
-        self.gamepad_signals.device_changed.connect(self.refresh_gamepads)
         self.gamepad_signals.gamepad_list_updated.connect(self.on_gamepad_list_updated)
         self.gamepad_signals.raw_event.connect(self.ui.log_raw_event)
 
@@ -73,7 +71,6 @@ class MainApplication:
         self.refresh_gamepads()
 
     def refresh_serial_ports(self):
-        # This function does not interact with Pygame, so it's safe.
         from device_manager import get_available_serial_ports
         self.ui.serial_select.clear()
         ports = get_available_serial_ports()
@@ -81,11 +78,9 @@ class MainApplication:
         for port in ports: self.ui.serial_select.addItem(f"{port.device}", port.device)
 
     def refresh_gamepads(self):
-        """Sends a command to the handler thread to refresh the device list."""
         self.command_queue.put({'type': 'REFRESH_DEVICES'})
 
     def on_gamepad_list_updated(self, gamepads):
-        """Receives the new gamepad list from the handler and updates the UI."""
         current_selection = self.ui.gamepad_select.currentData()
         self.ui.gamepad_select.blockSignals(True)
         self.ui.gamepad_select.clear()
@@ -93,20 +88,22 @@ class MainApplication:
 
         found_current = False
         for i, gamepad in enumerate(gamepads):
-            self.ui.gamepad_select.addItem(gamepad['name'], gamepad['index'])
-            if gamepad['index'] == current_selection:
+            # The new handler sends a 'path' instead of an 'index'
+            self.ui.gamepad_select.addItem(gamepad['name'], gamepad['path'])
+            if gamepad['path'] == current_selection:
                 self.ui.gamepad_select.setCurrentIndex(i + 1)
                 found_current = True
 
         if not found_current and current_selection is not None:
-             self.command_queue.put({'type': 'SET_DEVICE', 'index': None})
+             self.command_queue.put({'type': 'SET_DEVICE', 'path': None})
 
         self.ui.gamepad_select.blockSignals(False)
 
     def select_gamepad(self, index):
         if index < 0: return
-        joystick_index = self.ui.gamepad_select.itemData(index)
-        command = {'type': 'SET_DEVICE', 'index': joystick_index}
+        # The item data is now the device path string
+        device_path = self.ui.gamepad_select.itemData(index)
+        command = {'type': 'SET_DEVICE', 'path': device_path}
         self.command_queue.put(command)
 
     def handle_gamepad_disconnect(self):
