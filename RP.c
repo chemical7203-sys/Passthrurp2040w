@@ -49,7 +49,8 @@ void debug_puts(const char *s) {
 }
 // Helper to print a buffer as a hex string
 void print_buf_hex(const uint8_t* buf, size_t len) {
-    char hex_str[3 * len + 5]; // +5 for "RAW: " and null terminator
+    // Allocate 1 extra byte for the null terminator to fix overflow warning.
+    char hex_str[3 * len + 6];
     strcpy(hex_str, "RAW: ");
     for (size_t i = 0; i < len; ++i) {
         sprintf(hex_str + 5 + 3 * i, "%02X ", buf[i]);
