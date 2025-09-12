@@ -45,6 +45,11 @@ class DS4Handler(threading.Thread):
                     print(f"DEBUG: DS4Handler: Joystick object retrieved from list for index {joystick_index}. Initializing...")
                     self.joystick.init()
                     print(f"DEBUG: DS4Handler: Successfully initialized joystick: {self.joystick.get_name()}")
+                    # --- DIAGNOSTIC ---
+                    # Check how many axes Pygame detects for this device.
+                    num_axes = self.joystick.get_numaxes()
+                    print(f"DEBUG: DS4Handler: Total axes detected: {num_axes}")
+                    # --- END DIAGNOSTIC ---
                 else:
                     print(f"ERROR: DS4Handler: Invalid joystick index {joystick_index}. Stored list length is {len(self.joysticks)}.")
                     self.signals.gamepad_disconnected.emit()
