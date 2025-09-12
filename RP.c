@@ -232,8 +232,9 @@ void hid_task(void) {
       report.report_counter = ds4_report_counter++;
 
       // --- DEBUG: Check endpoint status and memory integrity before sending ---
-      bool ep_in_busy = tud_hid_n_ep_busy(0, TUD_DIR_IN);
-      bool success = false;
+      // We discovered previously that sending the report with ID 0 (and the ID in the buffer)
+      // is the correct method for this setup.
+      bool success = tud_hid_report(0, &report, sizeof(report));
 
       if (should_print_debug) {
           char debug_str[100];
@@ -244,14 +245,10 @@ void hid_task(void) {
               last_fail_count = checksum_fail_count;
           }
 
-          sprintf(debug_str, "DEBUG HID: tud_hid_ready()=%d, ep_busy=%d\r\n", tud_hid_ready(), ep_in_busy);
+          sprintf(debug_str, "DEBUG HID: tud_hid_ready()=%d\r\n", tud_hid_ready());
           debug_puts(debug_str);
           sprintf(debug_str, "DEBUG HID: Pre-send dpad value = %u\r\n", report.dpad);
           debug_puts(debug_str);
-      }
-
-      if (!ep_in_busy) {
-        success = tud_hid_report(1, &report, sizeof(report));
       }
 
       if (should_print_debug) {
