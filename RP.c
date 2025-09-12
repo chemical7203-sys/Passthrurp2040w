@@ -93,10 +93,18 @@ void process_uart() {
 
                 if (cs == pb[22]) {
                     memcpy(&gamepad_data, &pb[1], sizeof(gamepad_data));
-                    // Optional: Add a "Checksum OK" log here if needed for debugging.
+                    // Log the parsed data for every valid packet to see if it's correct.
+                    debug_puts("DEBUG: Checksum OK. Parsed data:\r\n");
+                    char debug_str[100];
+                    sprintf(debug_str, "  Sticks (LX,LY,RX,RY): %d,%d,%d,%d\r\n", gamepad_data.lx, gamepad_data.ly, gamepad_data.rx, gamepad_data.ry);
+                    debug_puts(debug_str);
+                    sprintf(debug_str, "  Triggers (L2,R2): %u,%u\r\n", gamepad_data.l2, gamepad_data.r2);
+                    debug_puts(debug_str);
+                    sprintf(debug_str, "  DPAD: %u, Buttons: %04X\r\n", gamepad_data.dpad, gamepad_data.buttons);
+                    debug_puts(debug_str);
                 } else {
-                    // Optional: Add a "Checksum FAILED" log here.
-                    // This is less critical now, as the receiver will self-synchronize.
+                    debug_puts("DEBUG: Checksum FAILED. RAW packet:\r\n");
+                    print_buf_hex(pb, 23);
                 }
 
                 // Reset to state 0 to search for the next header.
@@ -207,7 +215,8 @@ void hid_task(void) {
       // D-Pad - fix rotational bug and out-of-range value
       uint8_t corrected_dpad = (gamepad_data.dpad + 1) % 9;
       if (corrected_dpad == 8) { // 8 is standard neutral, but descriptor max is 7
-        report.dpad = 15; // Use value from passinglink reference project
+        // Let's test the standard neutral value '8' instead of '15' to see if it fixes the stuck DPAD issue.
+        report.dpad = 8;
       } else {
         report.dpad = corrected_dpad;
       }
@@ -238,6 +247,9 @@ void hid_task(void) {
       if (should_print_debug) {
           char debug_str[100];
           sprintf(debug_str, "DEBUG HID: tud_hid_ready()=%d. Attempting to send report...\r\n", tud_hid_ready());
+          debug_puts(debug_str);
+          // Log the final dpad value being sent
+          sprintf(debug_str, "  Final DPAD value being sent: %u\r\n", report.dpad);
           debug_puts(debug_str);
           debug_puts("Report data to be sent:\r\n");
           print_buf_hex((uint8_t*)&report, sizeof(report));
