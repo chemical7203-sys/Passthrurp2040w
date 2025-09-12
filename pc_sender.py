@@ -13,21 +13,32 @@ BAUD_RATE = 115200
 # --- Protocol Definitions ---
 PROTOCOL_HEADER = 0xA6
 
-def create_packet_v2(buttons, lx, ly, l2, r2, rx, ry, dpad):
-    """Creates a 23-byte packet compatible with the firmware's gamepad_data_v2_t."""
+def create_packet_v2(buttons, lx, ly, rx, ry, l2, r2, dpad):
+    """
+    Creates a 23-byte packet compatible with the firmware's gamepad_data_v2_t.
+    NOTE: The order of arguments has been changed to fix the trigger/stick swap bug.
+    The C struct is: { buttons, lx, ly, l2, r2, rx, ry, dpad, ... }
+    But the bug symptoms suggest the firmware is actually expecting the right stick
+    data before the trigger data. This change reflects that hypothesis.
+    """
 
     # For now, accel and gyro data are zeroed out as we are focusing on basic inputs.
     accel_x, accel_y, accel_z = 0, 0, 0
     gyro_x, gyro_y, gyro_z = 0, 0, 0
 
     # Pack the data according to the gamepad_data_v2_t struct format
-    # Format: <H b b B B b b B h h h h h h
+    # Format: <H b b b b B B B h h h h h h
     # H: buttons (uint16)
     # b: lx, ly, rx, ry (int8)
     # B: l2, r2, dpad (uint8)
     # h: accel/gyro (int16)
-    payload = struct.pack('<HbbBBbbBhhhhhh',
-                          buttons, lx, ly, l2, r2, rx, ry, dpad,
+    # The previous format was '<HbbBBbbB...'. The bug symptoms (r-stick moves triggers)
+    # strongly suggest the firmware expects the r-stick bytes before the trigger bytes.
+    # The C struct is {H,bb,BB,bb,B,hhhhhh}. Our hypothesis is the firmware expects
+    # {H,bb,bb,BB,B,hhhhhh}.
+    # So we now pack rx,ry (bb) before l2,r2 (BB).
+    payload = struct.pack('<HbbbbBBBhhhhhh',
+                          buttons, lx, ly, rx, ry, l2, r2, dpad,
                           accel_x, accel_y, accel_z,
                           gyro_x, gyro_y, gyro_z)
 
@@ -70,10 +81,7 @@ def main():
     # Values correspond to a real DS4 controller input
     test_cases = [
         {"name": "Center", "buttons": 0, "lx": 0, "ly": 0, "l2": 0, "r2": 0, "rx": 0, "ry": 0, "dpad": 8},
-        {"name": "Right", "buttons": 0, "lx": 127, "ly": 0, "l2": 0, "r2": 0, "rx": 0, "ry": 0, "dpad": 8},
-        {"name": "Left", "buttons": 0, "lx": -127, "ly": 0, "l2": 0, "r2": 0, "rx": 0, "ry": 0, "dpad": 8},
-        {"name": "D-Pad Up", "buttons": 0, "lx": 0, "ly": 0, "l2": 0, "r2": 0, "rx": 0, "ry": 0, "dpad": 0},
-        {"name": "Cross", "buttons": (1<<1), "lx": 0, "ly": 0, "l2": 0, "r2": 0, "rx": 0, "ry": 0, "dpad": 8},
+        {"name": "Right Stick Right", "buttons": 0, "lx": 0, "ly": 0, "l2": 0, "r2": 0, "rx": 127, "ry": 0, "dpad": 8},
         {"name": "L2 Trigger", "buttons": 0, "lx": 0, "ly": 0, "l2": 255, "r2": 0, "rx": 0, "ry": 0, "dpad": 8},
     ]
 
@@ -83,10 +91,12 @@ def main():
             # Get the current test case
             case = test_cases[case_index]
 
-            # Create the packet
+            # Create the packet. Note the new argument order to fix the swap bug.
             packet = create_packet_v2(
-                case["buttons"], case["lx"], case["ly"], case["l2"], case["r2"],
-                case["rx"], case["ry"], case["dpad"]
+                case["buttons"], case["lx"], case["ly"],
+                case["rx"], case["ry"], # Swapped
+                case["l2"], case["r2"], # Swapped
+                case["dpad"]
             )
 
             # Print and send
