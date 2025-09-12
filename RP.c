@@ -251,6 +251,14 @@ void hid_task(void) {
       report.ps = (gamepad_data.buttons >> 12) & 1;
       report.tpad_click = (gamepad_data.buttons >> 13) & 1;
 
+      // Gyro and Accelerometer
+      report.accel_x = gamepad_data.accel_x;
+      report.accel_y = gamepad_data.accel_y;
+      report.accel_z = gamepad_data.accel_z;
+      report.gyro_x = gamepad_data.gyro_x;
+      report.gyro_y = gamepad_data.gyro_y;
+      report.gyro_z = gamepad_data.gyro_z;
+
       // Report counter
       static uint8_t ds4_report_counter = 0;
       report.report_counter = ds4_report_counter++;
