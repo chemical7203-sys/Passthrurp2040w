@@ -97,9 +97,10 @@ class SerialHandler:
         header = 0xA6
 
         # 1. Construct the 21-byte payload
-        # Format: < (little-endian), H (buttons), 4b (sticks), B(l2), B(r2), B(dpad), 6h (motion)
-        payload = struct.pack('<H4bBBB6h',
-            buttons, lx, ly, rx, ry, l2, r2, dpad,
+        # Format: < (little-endian), H (buttons), bb (lstick), BB (triggers), bb (rstick), B(dpad), 6h (motion)
+        # The C struct in the firmware expects: lx, ly, l2, r2, rx, ry
+        payload = struct.pack('<HbbBBbbB6h',
+            buttons, lx, ly, l2, r2, rx, ry, dpad,
             accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z
         )
 
