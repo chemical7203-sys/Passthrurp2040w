@@ -47,6 +47,28 @@ void setup_uart() {
 void debug_puts(const char *s) {
     uart_puts(UART_ID, s);
 }
+// --- CRC8 Implementation from hdtodd/CRC8-Library ---
+static uint8_t crc8_table[256];
+static void build_crc8_table(uint8_t poly) {
+    for (uint16_t i = 0; i < 256; i++) {
+        uint8_t c = i;
+        for (uint8_t j = 0; j < 8; j++) {
+            c = ((c & 0x80) == 0) ? (c << 1) : ((c << 1) ^ poly);
+        }
+        crc8_table[i] = c;
+    }
+}
+
+static uint8_t crc8(uint8_t *data, int len, uint8_t init) {
+    uint8_t crc = init;
+    while (len-- > 0) {
+        crc = crc8_table[(crc ^ *data++)];
+    }
+    return crc;
+}
+// ----------------------------------------------------
+
+
 // Helper to print a buffer as a hex string
 void print_buf_hex(const uint8_t* buf, size_t len) {
     // Allocate 1 extra byte for the null terminator to fix overflow warning.
@@ -61,49 +83,36 @@ void print_buf_hex(const uint8_t* buf, size_t len) {
 }
 
 void process_uart() {
-    // Expecting a 23-byte packet: 1 header + 21 payload + 1 checksum
     static uint8_t pb[23];
     static uint8_t idx = 0;
+
     while (uart_is_readable(UART_ID)) {
         uint8_t ch = uart_getc(UART_ID);
+
+        // State 0: Searching for header
         if (idx == 0) {
             if (ch == 0xA6) {
-                pb[idx++] = ch;
+                pb[0] = ch;
+                idx = 1;
             }
-        } else {
-            pb[idx++] = ch;
+        }
+        // State 1: Receiving payload
+        else {
+            pb[idx] = ch;
+            idx++;
+
             if (idx >= 23) {
-                uint8_t cs = 0;
-                // Checksum is now over the header and the 21-byte payload
-                for (int i = 0; i < 22; i++) {
-                    cs ^= pb[i];
-                }
+                // Verify packet with CRC8 instead of XOR
+                uint8_t calculated_crc = crc8(pb, 22, 0xFF);
+                uint8_t received_crc = pb[22];
 
-                if (cs == pb[22]) {
-                    // Always copy data if checksum is ok
+                if (calculated_crc == received_crc) {
                     memcpy(&gamepad_data, &pb[1], sizeof(gamepad_data));
-
-                    // --- Throttle debug printing to every 500ms ---
-                    static uint32_t last_uart_debug_ms = 0;
-                    if (board_millis() - last_uart_debug_ms > 500) {
-                        last_uart_debug_ms = board_millis();
-
-                        debug_puts("--- UART Packet Snapshot ---\r\n");
-                        print_buf_hex(pb, 23);
-                        debug_puts("DEBUG: Checksum OK.\r\n");
-
-                        // Print parsed data from the now-updated gamepad_data
-                        char debug_str[100];
-                        sprintf(debug_str, "DEBUG: Parsed sticks (LX,LY,RX,RY): %d,%d,%d,%d\r\n", gamepad_data.lx, gamepad_data.ly, gamepad_data.rx, gamepad_data.ry);
-                        debug_puts(debug_str);
-                        sprintf(debug_str, "DEBUG: Parsed triggers (L2,R2): %u,%u\r\n", gamepad_data.l2, gamepad_data.r2);
-                        debug_puts(debug_str);
-                        sprintf(debug_str, "DEBUG: Parsed dpad: %u\r\n", gamepad_data.dpad);
-                        debug_puts(debug_str);
-                    }
                 } else {
                     checksum_fail_count++;
                 }
+
+                // Reset to state 0 to search for the next header
                 idx = 0;
             }
         }
@@ -283,6 +292,7 @@ void debug_task() {
 int main() {
     board_init();
     setup_uart();
+    build_crc8_table(0x07); // Initialize CRC8 table with standard polynomial
     tusb_init();
 
     // --- DEBUG START ---

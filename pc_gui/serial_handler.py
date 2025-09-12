@@ -10,8 +10,26 @@ class SerialHandler:
         self.port = None
         self.read_thread = None
         self._running = False
-        # Use a deque for thread-safe, efficient appends and pops
         self.rx_queue = deque(maxlen=100)
+        # CRC8 setup
+        self.CRC8Table = bytearray(256)
+        self._buildCRC8Table(0x07) # Standard CRC-8 polynomial
+
+    # --- CRC8 Implementation from hdtodd/CRC8-Library ---
+    def _buildCRC8Table(self, poly):
+      for i in range (0,256):
+        c = i
+        for j in range (0,8):
+            c = c<<1 if ((c & 0x80) == 0) else (c<<1) ^ poly
+            c &= 0xff
+        self.CRC8Table[i] = c
+
+    def _crc8(self, msg, init):
+      rem = init
+      for byte in msg:
+        rem = self.CRC8Table[ (rem ^ byte)] & 0xff
+      return rem
+    # ----------------------------------------------------
 
     def connect(self, port, baudrate=115200):
         if self.ser and self.ser.is_open:
@@ -52,22 +70,16 @@ class SerialHandler:
         """Continuously reads from the serial port and puts lines in a queue."""
         while self._running and self.ser and self.ser.is_open:
             try:
-                # Low-level debug to see if any bytes are coming in at all
-                if self.ser.in_waiting > 0:
-                    raw_bytes = self.ser.read(self.ser.in_waiting)
-                    print(f"RAW BYTES RECEIVED: {' '.join(f'{b:02x}' for b in raw_bytes)}")
-                    # The original logic remains, but we now see the raw data first
-                    # It's likely the readline below will not work if no newline is sent
-                    line = raw_bytes.decode('utf-8', errors='ignore').strip()
-                    if line:
-                        self.rx_queue.append(line)
-
+                # Use readline() to properly capture lines of debug text from firmware
+                line = self.ser.readline().decode('utf-8', errors='ignore').strip()
+                if line:
+                    self.rx_queue.append(line)
             except serial.SerialException:
                 print("Serial port disconnected during read.")
                 break
             except Exception as e:
                 print(f"ERROR: Serial read loop exception: {e}")
-            time.sleep(0.01) # Yield CPU
+            # No sleep needed as readline() is blocking with a timeout
 
     def get_all_received_lines(self):
         """Pops all current lines from the queue and returns them."""
@@ -80,13 +92,10 @@ class SerialHandler:
         return lines
 
     def _create_packet_v2(self, state):
-        # Standard buttons and axes
         buttons = state.get('buttons', 0); dpad = state.get('dpad', 0)
         lx = max(-127, min(127, state.get('lx', 0))); ly = max(-127, min(127, state.get('ly', 0)))
         rx = max(-127, min(127, state.get('rx', 0))); ry = max(-127, min(127, state.get('ry', 0)))
         l2 = max(0, min(255, state.get('l2', 0))); r2 = max(0, min(255, state.get('r2', 0)))
-
-        # Gyro and accelerometer values
         accel_x = max(-32767, min(32767, state.get('accel_x', 0)))
         accel_y = max(-32767, min(32767, state.get('accel_y', 0)))
         accel_z = max(-32767, min(32767, state.get('accel_z', 0)))
@@ -96,20 +105,16 @@ class SerialHandler:
 
         header = 0xA6
 
-        # 1. Construct the 21-byte payload
-        # Format: < (little-endian), H (buttons), bb (lstick), BB (triggers), bb (rstick), B(dpad), 6h (motion)
-        # The C struct in the firmware expects: lx, ly, l2, r2, rx, ry
         payload = struct.pack('<HbbBBbbB6h',
             buttons, lx, ly, l2, r2, rx, ry, dpad,
             accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z
         )
 
-        # 2. Calculate checksum over the header and the 21-byte payload
-        checksum = header
-        for byte in payload:
-            checksum ^= byte
+        message_to_checksum = bytearray([header]) + payload
 
-        # 3. Return the final 23-byte packet
+        # Calculate CRC8 checksum instead of simple XOR
+        checksum = self._crc8(message_to_checksum, 0xFF)
+
         return bytearray([header]) + payload + bytearray([checksum])
 
     def send_gamepad_state_v2(self, state):
