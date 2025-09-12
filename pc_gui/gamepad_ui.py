@@ -16,6 +16,8 @@ class GamepadSignals(QObject):
     device_changed = pyqtSignal()
     gamepad_list_updated = pyqtSignal(list)
     raw_event = pyqtSignal(str)
+    # For motion sensors: accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z
+    motion_event = pyqtSignal(int, int, int, int, int, int)
 
 # --- Gamepad Graphics Widget ---
 class GamepadWidget(QGraphicsView):

@@ -1,8 +1,40 @@
 import threading
 import time
-import pygame
-import os
+import hid
+import struct
 from queue import Queue, Empty
+
+# DS4 Vendor ID and Product IDs
+SONY_VID = 0x054C
+DS4_PID = 0x05C4
+DS4_V2_PID = 0x09CC
+
+# Mapping from DS4 HAT value to DPAD button states
+# Note: This maps the 8-direction value to a set of string identifiers.
+DPAD_MAP = {
+    0: {'DPAD_UP'}, 1: {'DPAD_UP', 'DPAD_RIGHT'}, 2: {'DPAD_RIGHT'},
+    3: {'DPAD_DOWN', 'DPAD_RIGHT'}, 4: {'DPAD_DOWN'}, 5: {'DPAD_DOWN', 'DPAD_LEFT'},
+    6: {'DPAD_LEFT'}, 7: {'DPAD_UP', 'DPAD_LEFT'}, 8: set()  # 8 is neutral
+}
+
+# Mapping from report byte/bit to button name for standard buttons
+# Format: (byte_index, bit_mask, button_name)
+BUTTON_MAP = [
+    (5, 1 << 4, 'BTN_WEST'),   # Square
+    (5, 1 << 5, 'BTN_SOUTH'),  # Cross
+    (5, 1 << 6, 'BTN_EAST'),   # Circle
+    (5, 1 << 7, 'BTN_NORTH'),  # Triangle
+    (6, 1 << 0, 'BTN_TL'),     # L1
+    (6, 1 << 1, 'BTN_TR'),     # R1
+    (6, 1 << 2, 'BTN_TL2'),    # L2 Button Press
+    (6, 1 << 3, 'BTN_TR2'),    # R2 Button Press
+    (6, 1 << 4, 'BTN_SELECT'), # Share
+    (6, 1 << 5, 'BTN_START'),  # Options
+    (6, 1 << 6, 'BTN_THUMBL'), # L3
+    (6, 1 << 7, 'BTN_THUMBR'), # R3
+    (7, 1 << 0, 'BTN_MODE'),   # PS Button
+    (7, 1 << 1, 'TPAD_CLICK')# Touchpad Click
+]
 
 class DS4Handler(threading.Thread):
     def __init__(self, signals, command_queue):
@@ -10,147 +42,132 @@ class DS4Handler(threading.Thread):
         self.daemon = True
         self.signals = signals
         self.command_queue = command_queue
-        self.joystick = None
-        self.joysticks = [] # Store persistent joystick objects
+        self.device = None
+        self.last_report = None
+        self.running = True
 
-    def _initialize_pygame(self):
-        """Initializes Pygame and its subsystems with detailed logging."""
-        print("DEBUG: DS4Handler: Initializing Pygame...")
-        try:
-            os.environ['SDL_VIDEODRIVER'] = 'dummy'
-            pygame.init()
-            pygame.joystick.init()
-            print(f"DEBUG: DS4Handler: Pygame initialized successfully.")
-            return True
-        except Exception as e:
-            print(f"FATAL: DS4Handler: Pygame failed to initialize: {e}")
-            return False
+    def _set_device(self, device_path):
+        """Opens or closes the specified HID device based on its path."""
+        if self.device:
+            self.device.close()
+            self.device = None
+            self.last_report = None
+            print("DEBUG: DS4Handler: Closed previous HID device.")
 
-    def _set_device(self, joystick_index):
-        """Sets or clears the active joystick device using the persistent list."""
-        print(f"DEBUG: DS4Handler: Received SET_DEVICE command for index {joystick_index}")
-        if self.joystick:
+        if device_path:
             try:
-                print(f"DEBUG: DS4Handler: Quitting previous joystick instance.")
-                self.joystick.quit()
-            except Exception as e:
-                print(f"ERROR: DS4Handler: Exception while quitting joystick: {e}")
-            finally:
-                self.joystick = None
-
-        if joystick_index is not None:
-            try:
-                if len(self.joysticks) > joystick_index:
-                    self.joystick = self.joysticks[joystick_index] # Use the stored object
-                    print(f"DEBUG: DS4Handler: Joystick object retrieved from list for index {joystick_index}. Initializing...")
-                    self.joystick.init()
-                    print(f"DEBUG: DS4Handler: Successfully initialized joystick: {self.joystick.get_name()}")
-                else:
-                    print(f"ERROR: DS4Handler: Invalid joystick index {joystick_index}. Stored list length is {len(self.joysticks)}.")
-                    self.signals.gamepad_disconnected.emit()
-            except pygame.error as e:
-                print(f"ERROR: DS4Handler: Pygame error while setting device: {e}")
-                self.joystick = None
+                self.device = hid.device()
+                self.device.open_path(device_path)
+                self.device.set_nonblocking(1)
+                print(f"DEBUG: DS4Handler: Successfully opened {self.device.get_product_string()}.")
+            except (IOError, hid.error) as e:
+                print(f"ERROR: DS4Handler: Failed to open HID device at {device_path}: {e}")
+                self.device = None
                 self.signals.gamepad_disconnected.emit()
         else:
-            print("DEBUG: DS4Handler: Joystick index is None, device cleared.")
-
-    def _refresh_devices(self):
-        """Scans for gamepads, stores them persistently, and emits a signal with their info."""
-        print("DEBUG: DS4Handler: Received REFRESH_DEVICES command.")
-        # Quit all joysticks in the old list before refreshing
-        for joy in self.joysticks:
-            joy.quit()
-        self.joysticks.clear()
-
-        pygame.joystick.quit()
-        pygame.joystick.init()
-        pygame.event.clear() # Discard any events generated by re-initialization
-
-        gamepads_info = []
-        count = pygame.joystick.get_count()
-        print(f"DEBUG: DS4Handler: Found {count} joysticks.")
-        for i in range(count):
-            try:
-                joystick = pygame.joystick.Joystick(i)
-                self.joysticks.append(joystick) # Store the object
-                gamepads_info.append({'name': joystick.get_name(), 'index': i})
-            except pygame.error as e:
-                print(f"DEBUG: DS4Handler: Could not get info for joystick {i}: {e}")
-                continue
-
-        print(f"DEBUG: DS4Handler: Emitting gamepad list: {gamepads_info}")
-        self.signals.gamepad_list_updated.emit(gamepads_info)
-
-    def _handle_events(self):
-        try:
-            for event in pygame.event.get():
-                # The refresh logic now handles device changes more gracefully.
-                # A full refresh is triggered by the main UI thread.
-                if event.type == pygame.JOYDEVICEADDED or event.type == pygame.JOYDEVICEREMOVED:
-                    self.signals.device_changed.emit()
-
-                if self.joystick and self.joystick.get_init():
-                    if hasattr(event, 'instance_id') and event.instance_id == self.joystick.get_instance_id():
-                        self._process_game_event(event)
-        except pygame.error as e:
-            print(f"ERROR: DS4Handler: Pygame error in event loop: {e}. Disconnecting.")
-            self.joystick = None
+            # This is called when deselecting a device
             self.signals.gamepad_disconnected.emit()
 
-    def run(self):
-        if not self._initialize_pygame():
-            return
+    def _refresh_devices(self):
+        """Scans for DS4 gamepads and emits a signal with their info."""
+        print("DEBUG: DS4Handler: Refreshing HID devices for DS4...")
+        # Enumerate all devices from Sony (VID)
+        devices = hid.enumerate(SONY_VID, 0)
+        ds4_devices = []
+        for dev in devices:
+            # Filter for DS4 product IDs
+            if dev['product_id'] in [DS4_PID, DS4_V2_PID]:
+                # The 'path' can be bytes on Linux, so decode it to be safe.
+                path = dev['path'].decode() if isinstance(dev['path'], bytes) else dev['path']
+                device_info = {'name': dev['product_string'], 'path': path}
+                ds4_devices.append(device_info)
 
-        running = True
-        while running:
+        print(f"DEBUG: DS4Handler: Found {len(ds4_devices)} DS4 devices.")
+        self.signals.gamepad_list_updated.emit(ds4_devices)
+
+    def run(self):
+        """Main thread loop: processes commands and reads HID reports."""
+        print("DEBUG: DS4Handler: HID listener thread started.")
+        while self.running:
+            # 1. Process commands from the main thread
             try:
                 command = self.command_queue.get_nowait()
-                print(f"DEBUG: DS4Handler: Command received from queue: {command}")
                 cmd_type = command.get('type')
+                print(f"DEBUG: DS4Handler: Command received: {cmd_type}")
 
                 if cmd_type == 'SET_DEVICE':
-                    self._set_device(command.get('index'))
+                    self._set_device(command.get('path'))
                 elif cmd_type == 'REFRESH_DEVICES':
                     self._refresh_devices()
                 elif cmd_type == 'STOP':
-                    running = False
+                    self.running = False
             except Empty:
-                pass
+                pass # No commands in queue
 
-            if self.joystick:
-                self._handle_events()
+            # 2. Read from the HID device if it's open
+            if self.device:
+                try:
+                    # Read a 64-byte report. set_nonblocking(1) makes this non-blocking.
+                    report = self.device.read(64)
+                    if report and report[0] == 0x01: # Check for standard DS4 report ID
+                        self._parse_hid_report(bytes(report))
+                except hid.error as e:
+                    print(f"ERROR: DS4Handler: HID read error: {e}. Disconnecting.")
+                    self._set_device(None) # Disconnect on error
 
-            time.sleep(0.01)
+            # Sleep to prevent high CPU usage, 500Hz is a good poll rate for a controller
+            time.sleep(0.002)
 
-        pygame.quit()
-        print("DEBUG: DS4Handler: Thread stopped.")
+        if self.device:
+            self.device.close()
+        print("DEBUG: DS4Handler: Thread stopped and cleaned up.")
 
-    def _process_game_event(self, event):
-        self.signals.raw_event.emit(str(event))
-        if event.type == pygame.JOYAXISMOTION:
-            # Axis mapping for DS4 controller
-            # 0,1: Left Stick | 2,3: Right Stick | 4: L2 Trigger | 5: R2 Trigger
-            # 6,7,8: Accel X,Y,Z | 9,10,11: Gyro X,Y,Z
-            axis_map = {
-                0: 'ABS_X', 1: 'ABS_Y', 2: 'ABS_RX', 3: 'ABS_RY',
-                4: 'ABS_Z', 5: 'ABS_RZ',
-                6: 'ABS_HAT0X', 7: 'ABS_HAT0Y', 8: 'ABS_HAT0Z', # Accel
-                9: 'ABS_HAT1X', 10: 'ABS_HAT1Y', 11: 'ABS_HAT1Z'  # Gyro
-            }
-            if event.axis in axis_map:
-                # Separate triggers from other axes
-                if event.axis in [4, 5]:
-                    self.signals.trigger_event.emit(axis_map[event.axis], event.value)
-                else:
-                    self.signals.stick_event.emit(axis_map[event.axis], event.value)
-        elif event.type == pygame.JOYBUTTONDOWN or event.type == pygame.JOYBUTTONUP:
-            pressed = (event.type == pygame.JOYBUTTONDOWN)
-            button_map = {
-                0: 'BTN_SOUTH', 1: 'BTN_EAST', 2: 'BTN_WEST', 3: 'BTN_NORTH',
-                9: 'BTN_TL', 10: 'BTN_TR', 7: 'BTN_THUMBL', 8: 'BTN_THUMBR',
-                11: 'DPAD_UP', 12: 'DPAD_DOWN', 13: 'DPAD_LEFT', 14: 'DPAD_RIGHT',
-                6: 'BTN_START', 4: 'BTN_SELECT', 5: 'BTN_MODE'
-            }
-            if event.button in button_map:
-                self.signals.button_event.emit(button_map[event.button], pressed)
+    def _parse_hid_report(self, report):
+        """Parses the 64-byte HID report and emits signals only on state changes."""
+        if self.last_report == report:
+            return # If the report is identical, do nothing.
+
+        # --- Sticks (0-255 range, 128 is center) ---
+        # Convert to a -1.0 to 1.0 float range like pygame
+        lx, ly, rx, ry = [(v - 128) / 128.0 for v in report[1:5]]
+        # Compare with last report to emit signal only on change
+        if not self.last_report or lx != ((self.last_report[1] - 128) / 128.0): self.signals.stick_event.emit('ABS_X', lx)
+        if not self.last_report or ly != ((self.last_report[2] - 128) / 128.0): self.signals.stick_event.emit('ABS_Y', ly)
+        if not self.last_report or rx != ((self.last_report[3] - 128) / 128.0): self.signals.stick_event.emit('ABS_RX', rx)
+        if not self.last_report or ry != ((self.last_report[4] - 128) / 128.0): self.signals.stick_event.emit('ABS_RY', ry)
+
+        # --- Triggers (0-255 range) ---
+        # Convert to -1.0 (released) to 1.0 (fully pressed) float range
+        l2_trigger, r2_trigger = [(v / 127.5) - 1.0 for v in report[8:10]]
+        if not self.last_report or l2_trigger != ((self.last_report[8] / 127.5) - 1.0): self.signals.trigger_event.emit('ABS_Z', l2_trigger)
+        if not self.last_report or r2_trigger != ((self.last_report[9] / 127.5) - 1.0): self.signals.trigger_event.emit('ABS_RZ', r2_trigger)
+
+        # --- Buttons ---
+        for byte_idx, mask, name in BUTTON_MAP:
+            current_state = (report[byte_idx] & mask) != 0
+            # If there's no last report, we must assume the previous state was different to send initial state
+            last_state = (self.last_report[byte_idx] & mask) != 0 if self.last_report else not current_state
+            if current_state != last_state:
+                self.signals.button_event.emit(name, current_state)
+
+        # --- DPAD (HAT Switch) ---
+        current_dpad_val = report[5] & 0x0F
+        last_dpad_val = (self.last_report[5] & 0x0F) if self.last_report else -1 # Use -1 to ensure initial check runs
+        if current_dpad_val != last_dpad_val:
+            current_buttons = DPAD_MAP.get(current_dpad_val, set())
+            last_buttons = DPAD_MAP.get(last_dpad_val, set())
+            # Emit press for new buttons
+            for btn in current_buttons - last_buttons: self.signals.button_event.emit(btn, True)
+            # Emit release for old buttons
+            for btn in last_buttons - current_buttons: self.signals.button_event.emit(btn, False)
+
+        # --- Motion Sensors (Gyro & Accelerometer) ---
+        # Data is from bytes 13 to 24. Only unpack and emit if this section has changed.
+        if not self.last_report or report[13:25] != self.last_report[13:25]:
+            # '<' specifies little-endian, 'h' is a signed 16-bit integer (short)
+            gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z = struct.unpack_from('<hhhhhh', report, 13)
+            # Emit the new motion signal with all 6 values
+            if hasattr(self.signals, 'motion_event'):
+                self.signals.motion_event.emit(accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z)
+
+        self.last_report = report
