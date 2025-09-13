@@ -60,7 +60,7 @@ class DS4Handler(threading.Thread):
                 self.device.open_path(device_path)
                 self.device.set_nonblocking(1)
                 print(f"DEBUG: DS4Handler: Successfully opened {self.device.get_product_string()}.")
-            except (IOError, hid.error) as e:
+            except Exception as e:
                 print(f"ERROR: DS4Handler: Failed to open HID device at {device_path}: {e}")
                 self.device = None
                 self.signals.gamepad_disconnected.emit()
@@ -77,9 +77,9 @@ class DS4Handler(threading.Thread):
         for dev in devices:
             # Filter for DS4 product IDs
             if dev['product_id'] in [DS4_PID, DS4_V2_PID]:
-                # The 'path' can be bytes on Linux, so decode it to be safe.
-                path = dev['path'].decode() if isinstance(dev['path'], bytes) else dev['path']
-                device_info = {'name': dev['product_string'], 'path': path}
+                # The 'path' object from hid.enumerate() is used directly,
+                # as open_path() expects the raw object type.
+                device_info = {'name': dev['product_string'], 'path': dev['path']}
                 ds4_devices.append(device_info)
 
         print(f"DEBUG: DS4Handler: Found {len(ds4_devices)} DS4 devices.")
@@ -111,7 +111,7 @@ class DS4Handler(threading.Thread):
                     report = self.device.read(64)
                     if report and report[0] == 0x01: # Check for standard DS4 report ID
                         self._parse_hid_report(bytes(report))
-                except hid.error as e:
+                except Exception as e:
                     print(f"ERROR: DS4Handler: HID read error: {e}. Disconnecting.")
                     self._set_device(None) # Disconnect on error
 
