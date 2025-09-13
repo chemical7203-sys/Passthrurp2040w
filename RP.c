@@ -30,9 +30,11 @@ typedef struct __attribute__((packed)) {
 static gamepad_data_v2_t gamepad_data;
 
 // --- RF 433MHz rc-switch implementation ---
-// Timings for the rc-switch protocol (Type 1)
-#define RC_PULSE_LENGTH 190  // in microseconds
-#define RC_REPEATS      10   // Number of times to repeat the transmission
+// This is a C port of the send method from the popular rc-switch C++ library,
+// specifically for Protocol 1, which is the most common for simple 433MHz devices.
+// Default values are used for pulse length and repeat count.
+#define RC_PULSE_LENGTH 350  // Default pulse length in microseconds for Protocol 1.
+#define RC_REPEATS      10   // Standard number of re-transmissions for reliability.
 
 void transmit(int high_pulses, int low_pulses) {
     gpio_put(RF_TX_PIN, 1);
