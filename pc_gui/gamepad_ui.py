@@ -102,6 +102,14 @@ class GamepadUI(QWidget):
         group_label = QLabel("Device Selection"); group_label.setFont(QFont('Arial', 12, QFont.Weight.Bold)); main_layout.addWidget(group_label)
         gamepad_layout = QHBoxLayout(); self.gamepad_select = QComboBox(); self.gamepad_refresh_btn = QPushButton("Refresh"); gamepad_layout.addWidget(QLabel("Gamepad:")); gamepad_layout.addWidget(self.gamepad_select, 1); gamepad_layout.addWidget(self.gamepad_refresh_btn); main_layout.addLayout(gamepad_layout)
         serial_layout = QHBoxLayout(); self.serial_select = QComboBox(); self.serial_refresh_btn = QPushButton("Refresh"); self.serial_connect_btn = QPushButton("Connect"); serial_layout.addWidget(QLabel("Serial Port:")); serial_layout.addWidget(self.serial_select, 1); serial_layout.addWidget(self.serial_refresh_btn); serial_layout.addWidget(self.serial_connect_btn); main_layout.addLayout(serial_layout)
+
+        # --- RF Control Section ---
+        rf_label = QLabel("RF Control"); rf_label.setFont(QFont('Arial', 12, QFont.Weight.Bold)); main_layout.addWidget(rf_label)
+        rf_layout = QHBoxLayout()
+        self.rf_send_btn = QPushButton("Send RF Signal (11541137)")
+        rf_layout.addWidget(self.rf_send_btn)
+        main_layout.addLayout(rf_layout)
+
         main_layout.addWidget(QLabel("Raw Pygame Event Monitor:")); self.event_monitor = QTextEdit(); self.event_monitor.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse); self.event_monitor.setFixedHeight(100); main_layout.addWidget(self.event_monitor)
         main_layout.addWidget(QLabel("UART RX Monitor (from RP2040):")); self.uart_rx_monitor = QTextEdit(); self.uart_rx_monitor.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse); self.uart_rx_monitor.setFixedHeight(100); main_layout.addWidget(self.uart_rx_monitor)
     def log_raw_event(self, event_string):

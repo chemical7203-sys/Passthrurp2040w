@@ -13,7 +13,6 @@ class MainApplication:
         self.gamepad_signals = GamepadSignals()
 
         # Find the label next to the event monitor and update its text
-        # This is a bit brittle, but avoids changing gamepad_ui.py's structure
         for child in self.ui.findChildren(QLabel):
             if "Raw Pygame Event Monitor" in child.text():
                 child.setText("Raw HID Event Monitor:")
@@ -56,6 +55,7 @@ class MainApplication:
         self.ui.serial_refresh_btn.clicked.connect(self.refresh_serial_ports)
         self.ui.gamepad_refresh_btn.clicked.connect(self.refresh_gamepads)
         self.ui.gamepad_select.currentIndexChanged.connect(self.select_gamepad)
+        self.ui.rf_send_btn.clicked.connect(self.on_send_rf_signal)
 
         # Connect UI update signals
         self.gamepad_signals.stick_event.connect(self.ui.gamepad_widget.update_stick)
@@ -70,6 +70,13 @@ class MainApplication:
         self.gamepad_signals.button_event.connect(self.update_serial_state_from_event)
         self.gamepad_signals.trigger_event.connect(self.update_serial_state_from_event)
         self.gamepad_signals.motion_event.connect(self.on_motion_event)
+
+    def on_send_rf_signal(self):
+        """Handles the RF Send button click and sends the command via serial."""
+        print("INFO: RF Send button clicked. Sending command...")
+        # The specific code requested by the user
+        rf_code_to_send = 11541137
+        self.serial_handler.send_rf_code(rf_code_to_send)
 
     def on_motion_event(self, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z):
         """Handles the new motion event and updates the serial state."""

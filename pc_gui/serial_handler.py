@@ -121,3 +121,21 @@ class SerialHandler:
         if not self.ser or not self.ser.is_open: return
         packet = self._create_packet_v2(state)
         self.ser.write(packet)
+
+    def send_rf_code(self, code):
+        """Creates and sends a packet to command the firmware to send an RF code."""
+        if not self.ser or not self.ser.is_open:
+            print("ERROR: Serial port not connected. Cannot send RF code.")
+            return
+
+        header = 0xA7
+        # Pack the code as a 4-byte unsigned long, little-endian
+        payload = struct.pack('<L', code)
+
+        message_to_checksum = bytearray([header]) + payload
+        checksum = self._crc8(message_to_checksum, 0xFF)
+
+        packet = bytearray([header]) + payload + bytearray([checksum])
+
+        print(f"DEBUG: Sending RF code {code} with packet: {packet.hex()}")
+        self.ser.write(packet)
