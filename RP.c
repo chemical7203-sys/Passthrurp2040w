@@ -30,35 +30,54 @@ typedef struct __attribute__((packed)) {
 static gamepad_data_v2_t gamepad_data;
 
 // --- RF 433MHz rc-switch implementation ---
-// This is a C port of the send method from the popular rc-switch C++ library,
-// specifically for Protocol 1, which is the most common for simple 433MHz devices.
-// Default values are used for pulse length and repeat count.
-#define RC_PULSE_LENGTH 350  // Default pulse length in microseconds for Protocol 1.
-#define RC_REPEATS      10   // Standard number of re-transmissions for reliability.
+// This is a C port of the send method from the sui77/rc-switch C++ library.
+// It is hardcoded to use Protocol 1, which is the most common.
+// All timings and logic are based on the library's source code.
 
-void transmit(int high_pulses, int low_pulses) {
+typedef struct {
+    uint8_t high;
+    uint8_t low;
+} HighLow;
+
+typedef struct {
+    uint16_t pulseLength;
+    HighLow syncFactor;
+    HighLow zero;
+    HighLow one;
+} Protocol;
+
+// Definition for Protocol 1 from the rc-switch library
+const Protocol protocol = {
+    350,      // pulseLength
+    { 1, 31 },  // syncFactor
+    { 1, 3 },   // zero
+    { 3, 1 }    // one
+};
+const int nRepeatTransmit = 10; // Default repeat count
+
+void transmit(HighLow pulses) {
     gpio_put(RF_TX_PIN, 1);
-    sleep_us(RC_PULSE_LENGTH * high_pulses);
+    sleep_us(protocol.pulseLength * pulses.high);
     gpio_put(RF_TX_PIN, 0);
-    sleep_us(RC_PULSE_LENGTH * low_pulses);
+    sleep_us(protocol.pulseLength * pulses.low);
 }
 
-void send_rc_code(unsigned long code) {
-    for (int n = 0; n < RC_REPEATS; n++) {
-        // Send the 24-bit code
-        for (int i = 23; i >= 0; i--) {
+// A C port of RCSwitch::send(unsigned long code, unsigned int length)
+void send_rc_code(unsigned long code, unsigned int length) {
+    for (int n = 0; n < nRepeatTransmit; n++) {
+        // Send the code bits, MSB first
+        for (int i = length - 1; i >= 0; i--) {
             if ((code >> i) & 1) {
-                // '1' bit: 3 high, 1 low pulse lengths
-                transmit(3, 1);
+                transmit(protocol.one);
             } else {
-                // '0' bit: 1 high, 3 low pulse lengths
-                transmit(1, 3);
+                transmit(protocol.zero);
             }
         }
-        // Send Sync pulse (1 high, 31 low)
-        transmit(1, 31);
+        // Send the sync pulse *after* the code bits for each repetition
+        transmit(protocol.syncFactor);
     }
 }
+
 
 // --- UART and CRC8 ---
 #define UART_ID uart1
@@ -93,30 +112,28 @@ static uint8_t crc8(uint8_t *data, int len, uint8_t init) {
     return crc;
 }
 
-// Refactored UART processing to handle multiple packet types
 void process_uart() {
-    static uint8_t packet_buffer[32]; // Increased size for safety
+    static uint8_t packet_buffer[32];
     static uint8_t packet_idx = 0;
     static uint8_t expected_len = 0;
 
     while (uart_is_readable(UART_ID)) {
         uint8_t ch = uart_getc(UART_ID);
 
-        if (packet_idx == 0) { // Waiting for a header
-            if (ch == 0xA6) { // Gamepad Data Packet
+        if (packet_idx == 0) {
+            if (ch == 0xA6) {
                 packet_buffer[0] = ch;
                 expected_len = 23;
                 packet_idx = 1;
-            } else if (ch == 0xA7) { // RF Code Packet
+            } else if (ch == 0xA7) {
                 packet_buffer[0] = ch;
-                expected_len = 6; // 1 header + 4 code bytes + 1 crc
+                expected_len = 6;
                 packet_idx = 1;
             }
-        } else { // Receiving a packet
+        } else {
             packet_buffer[packet_idx++] = ch;
 
             if (packet_idx >= expected_len) {
-                // Full packet received, now process it
                 uint8_t calculated_crc = crc8(packet_buffer, expected_len - 1, 0xFF);
                 uint8_t received_crc = packet_buffer[expected_len - 1];
 
@@ -126,10 +143,10 @@ void process_uart() {
                     } else if (packet_buffer[0] == 0xA7) {
                         unsigned long rf_code;
                         memcpy(&rf_code, &packet_buffer[1], sizeof(rf_code));
-                        send_rc_code(rf_code);
+                        // The user's code is 24 bits long
+                        send_rc_code(rf_code, 24);
                     }
                 }
-                // Reset for next packet
                 packet_idx = 0;
                 expected_len = 0;
             }

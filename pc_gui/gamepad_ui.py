@@ -2,9 +2,9 @@ import sys
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QGridLayout, QComboBox,
     QPushButton, QHBoxLayout, QGraphicsView, QGraphicsScene, QGraphicsEllipseItem,
-    QGraphicsRectItem, QTextEdit
+    QGraphicsRectItem, QTextEdit, QLineEdit
 )
-from PyQt6.QtGui import QFont, QColor, QBrush, QPen
+from PyQt6.QtGui import QFont, QColor, QBrush, QPen, QIntValidator
 from PyQt6.QtCore import Qt, QObject, pyqtSignal
 
 # --- Signals ---
