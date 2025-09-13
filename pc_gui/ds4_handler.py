@@ -166,6 +166,8 @@ class DS4Handler(threading.Thread):
         if not self.last_report or report[13:25] != self.last_report[13:25]:
             # '<' specifies little-endian, 'h' is a signed 16-bit integer (short)
             gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z = struct.unpack_from('<hhhhhh', report, 13)
+            # --- DEBUG: Print raw motion data ---
+            print(f"DEBUG: Motion: G(x={gyro_x}, y={gyro_y}, z={gyro_z}), A(x={accel_x}, y={accel_y}, z={accel_z})")
             # Emit the new motion signal with all 6 values
             if hasattr(self.signals, 'motion_event'):
                 self.signals.motion_event.emit(accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z)
