@@ -60,6 +60,19 @@ class DS4Handler(threading.Thread):
                 self.device.open_path(device_path)
                 self.device.set_nonblocking(1)
                 print(f"DEBUG: DS4Handler: Successfully opened {self.device.get_product_string()}.")
+
+                # Send a feature report to enable motion sensing
+                try:
+                    # Report ID 0x02 is used by some DS4 models/firmwares to enable full reports (0x11)
+                    # which include the gyro/accelerometer data.
+                    print("DEBUG: DS4Handler: Sending feature report to enable motion sensing...")
+                    self.device.send_feature_report(b'\x02')
+                    print("DEBUG: DS4Handler: Feature report sent successfully.")
+                except Exception as e:
+                    # This might fail on some models/platforms, but it's not critical.
+                    # The read loop will still work, just potentially without motion data.
+                    print(f"WARNING: DS4Handler: Could not send feature report to enable motion: {e}")
+
             except Exception as e:
                 print(f"ERROR: DS4Handler: Failed to open HID device at {device_path}: {e}")
                 self.device = None
