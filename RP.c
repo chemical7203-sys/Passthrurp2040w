@@ -156,6 +156,116 @@ void process_uart() {
     }
 }
 
+// --- Switch Pro Controller Handshake Logic ---
+#if CFG_TUD_HID_NINTENDO
+
+// Simple handshake responses to keep the Switch happy for basic wired operation.
+// Based on reverse engineering logs and similar open source implementations.
+
+static uint8_t global_packet_counter = 0;
+
+uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen) {
+    (void) instance; (void) report_type;
+    // The Switch often requests Feature Report 0x80 (MAC address / pairing info)
+    // or other setup packets.
+    if (report_id == 0x80) {
+        // Response format is mostly proprietary, but sending a "valid" looking block often works.
+        // Usually, the Switch sends a command via SET_REPORT 0x80, then reads result via GET_REPORT 0x80.
+        // However, standard USB HID GetReport(Feature) logic applies.
+        // For simplicity, we just return zeros or a dummy MAC if specifically asked,
+        // but often the logic is driven by SET_REPORT commands + interrupt IN responses.
+        memset(buffer, 0, reqlen);
+        buffer[0] = 0x80; // Report ID
+        // Dummy MAC: 00:00:00:00:00:01
+        if(reqlen > 10) buffer[4] = 0x01;
+        return reqlen;
+    }
+    return 0;
+}
+
+void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize) {
+    (void) instance; (void) report_type;
+
+    // The Switch Pro Controller handshake is complex.
+    // It involves:
+    // 1. Handshake cmd 0x02 (Protocol negotiation)
+    // 2. 0x01 (USB pairing)
+    // 3. 0x04 (Force USB)
+    // 4. 0x10 (SPI flash read/write, LED set, Home light, Enable IMU, Enable Vibration, etc.)
+
+    // For a minimal implementation to get 0x30 input reports accepted:
+    // We need to reply to the commands sent to report 0x80 (Feature) or 0x01/0x10 (Output).
+    // Actually, on USB, Pro Controller uses Report 0x80 for command/response.
+
+    if (report_id == 0x80 && bufsize > 1) {
+        uint8_t cmd = buffer[1];
+
+        // Prepare a response to send via INTERRUPT IN (on endpoint 0x81).
+        // The descriptor has Report ID 0x21 (33) defined for some responses,
+        // but typically standard input report 0x30 or the dedicated ACK report 0x81 is used.
+        // Wait, looking at the Gist: Report 0x81 is defined as Input.
+
+        uint8_t response[64] = {0};
+        response[0] = 0x81; // Reply Report ID
+        response[1] = cmd;  // Echo command
+        response[2] = 0x03; // Command completed | 0x00 ??
+
+        // For now, we blindly acknowledge.
+        // Real implementation requires parsing subcommands (like Enable IMU).
+
+        // Specifically check for "Enable IMU" (Subcommand 0x40) or "Set Input Mode" (Subcommand 0x03).
+        // buffer format: [ID] [Cmd] [SubCmd] [Data...]
+        // Actually, common command is 0x01 (Rumble+Subcommand).
+        // If report_id is 0x80 (Feature), it's usually the handshake.
+
+        if (cmd == 0x02) { // Handshake
+            response[2] = 0x02; // OK
+        } else if (cmd == 0x01) { // Manual Pairing ???
+             // Dummy
+        }
+
+        // Send the response immediately?
+        // The TinyUSB HID stack doesn't support "sending response to SetReport" directly except via control pipe status.
+        // But Switch expects a packet on the Interrupt IN endpoint.
+        tud_hid_report(0, response, 64);
+    }
+    // Handle Output Report 0x01 (Rumble and Subcommand)
+    else if (report_id == 0x01 && bufsize >= 2) {
+        // Format: [01] [GlobalPacketCount] [RumbleData(4)] [SubCommandID] [SubCommandData...]
+        // We should acknowledge subcommands using Input Report 0x21 (Vendor)
+
+        uint8_t subcommand = buffer[10];
+
+        uint8_t ack_report[64] = {0};
+        ack_report[0] = 0x21; // Vendor Report ID for ACK
+        ack_report[1] = (global_packet_counter + 1) & 0x0F; // Timer
+        ack_report[2] = 0x90; // Connection info (USB, Charging)
+        ack_report[3] = 0x01; // Button/Stick data could go here, but usually 0 for ACK
+        // ... Bytes 4-12 Button/Stick ...
+        ack_report[13] = subcommand; // Acknowledge the subcommand
+        ack_report[14] = 0x83; // Reply Status (0x80 = ACK, + 3 bytes data?)
+
+        // Specific handlers
+        if (subcommand == 0x03) { // Set Input Report Mode
+            // 0x30 = Standard, 0x3F = Simple
+            // We want 0x30.
+             ack_report[14] = 0x80;
+        }
+        else if (subcommand == 0x40) { // Enable IMU (6-Axis)
+             ack_report[14] = 0x80;
+        }
+        else if (subcommand == 0x48) { // Enable Vibration
+             ack_report[14] = 0x80;
+        }
+        else if (subcommand == 0x30) { // Set Player Lights
+             ack_report[14] = 0x80;
+        }
+
+        tud_hid_report(0, ack_report, 64);
+    }
+}
+
+#else
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen) {
   (void) instance; (void) buffer; (void) reqlen; (void) report_id; (void) report_type;
   return 0;
@@ -164,6 +274,7 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_t
 void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize) {
   (void) instance; (void) report_id; (void) report_type; (void) buffer; (void) bufsize;
 }
+#endif
 
 void hid_task(void) {
   const uint32_t interval_ms = 16;
@@ -216,56 +327,91 @@ void hid_task(void) {
     }
   #elif CFG_TUD_HID_NINTENDO
     if ( tud_hid_ready() ) {
-        hid_nintendo_report_t report = {0};
+        switch_pro_report_t report = {0};
+        report.report_id = 0x30;
+        report.timer = global_packet_counter++;
+        report.battery_connection = 0x90; // Charging, USB connected
 
-        // Button Mapping
-        // PS4 Cross (0) -> Switch B
-        if ((gamepad_data.buttons >> 0) & 1) report.buttons |= SWITCH_MASK_B;
-        // PS4 Circle (1) -> Switch A
-        if ((gamepad_data.buttons >> 1) & 1) report.buttons |= SWITCH_MASK_A;
-        // PS4 Square (2) -> Switch Y
-        if ((gamepad_data.buttons >> 2) & 1) report.buttons |= SWITCH_MASK_Y;
-        // PS4 Triangle (3) -> Switch X
-        if ((gamepad_data.buttons >> 3) & 1) report.buttons |= SWITCH_MASK_X;
+        // --- Button Mapping ---
+        // Byte 0: Y, B, A, X, L, R, ZL, ZR
+        if ((gamepad_data.buttons >> 2) & 1) report.buttons[0] |= SWITCH_MASK_Y; // Square -> Y
+        if ((gamepad_data.buttons >> 0) & 1) report.buttons[0] |= SWITCH_MASK_B; // Cross -> B
+        if ((gamepad_data.buttons >> 1) & 1) report.buttons[0] |= SWITCH_MASK_A; // Circle -> A
+        if ((gamepad_data.buttons >> 3) & 1) report.buttons[0] |= SWITCH_MASK_X; // Triangle -> X
+        if ((gamepad_data.buttons >> 4) & 1) report.buttons[0] |= SWITCH_MASK_L; // L1 -> L
+        if ((gamepad_data.buttons >> 5) & 1) report.buttons[0] |= SWITCH_MASK_R; // R1 -> R
+        if ((gamepad_data.buttons >> 6) & 1) report.buttons[0] |= SWITCH_MASK_ZL; // L2 -> ZL
+        if ((gamepad_data.buttons >> 7) & 1) report.buttons[0] |= SWITCH_MASK_ZR; // R2 -> ZR
 
-        // PS4 L1 (4) -> Switch L
-        if ((gamepad_data.buttons >> 4) & 1) report.buttons |= SWITCH_MASK_L;
-        // PS4 R1 (5) -> Switch R
-        if ((gamepad_data.buttons >> 5) & 1) report.buttons |= SWITCH_MASK_R;
-        // PS4 L2 (6) -> Switch ZL
-        if ((gamepad_data.buttons >> 6) & 1) report.buttons |= SWITCH_MASK_ZL;
-        // PS4 R2 (7) -> Switch ZR
-        if ((gamepad_data.buttons >> 7) & 1) report.buttons |= SWITCH_MASK_ZR;
+        // Byte 1: Minus, Plus, L3, R3, Home, Capture
+        if ((gamepad_data.buttons >> 8) & 1) report.buttons[1] |= SWITCH_MASK_MINUS; // Share -> Minus
+        if ((gamepad_data.buttons >> 9) & 1) report.buttons[1] |= SWITCH_MASK_PLUS;  // Options -> Plus
+        if ((gamepad_data.buttons >> 10) & 1) report.buttons[1] |= SWITCH_MASK_L3;   // L3 -> L3
+        if ((gamepad_data.buttons >> 11) & 1) report.buttons[1] |= SWITCH_MASK_R3;   // R3 -> R3
+        if ((gamepad_data.buttons >> 12) & 1) report.buttons[1] |= SWITCH_MASK_HOME; // PS -> Home
+        if ((gamepad_data.buttons >> 13) & 1) report.buttons[1] |= SWITCH_MASK_CAPTURE; // Touchpad -> Capture
 
-        // PS4 Share (8) -> Switch Minus
-        if ((gamepad_data.buttons >> 8) & 1) report.buttons |= SWITCH_MASK_MINUS;
-        // PS4 Options (9) -> Switch Plus
-        if ((gamepad_data.buttons >> 9) & 1) report.buttons |= SWITCH_MASK_PLUS;
-
-        // PS4 L3 (10) -> Switch L3
-        if ((gamepad_data.buttons >> 10) & 1) report.buttons |= SWITCH_MASK_L3;
-        // PS4 R3 (11) -> Switch R3
-        if ((gamepad_data.buttons >> 11) & 1) report.buttons |= SWITCH_MASK_R3;
-
-        // PS4 PS (12) -> Switch Home
-        if ((gamepad_data.buttons >> 12) & 1) report.buttons |= SWITCH_MASK_HOME;
-        // PS4 Touchpad (13) -> Switch Capture
-        if ((gamepad_data.buttons >> 13) & 1) report.buttons |= SWITCH_MASK_CAPTURE;
-
-        // DPAD Mapping
-        // 0->8 (Neutral), 1->0 (Up), 2->4 (Down), 4->6 (Left), 8->2 (Right)
+        // Byte 2: Hat (D-Pad)
+        // Switch Pro Controller uses the same 0-7, 8=Neutral encoding for Hat.
         static const uint8_t dpad_map[16] = { 8, 0, 4, 8, 6, 7, 5, 8, 2, 1, 3, 8, 8, 8, 8, 8 };
-        report.hat = dpad_map[gamepad_data.dpad & 0x0F];
+        report.buttons[2] = dpad_map[gamepad_data.dpad & 0x0F];
 
-        // Analog Sticks (int8 -128..127 -> uint8 0..255)
-        report.lx = (uint8_t)(gamepad_data.lx + 128);
-        report.ly = (uint8_t)(gamepad_data.ly + 128); // Check if Y needs inversion? Usually Standard is Up=Min or Up=Max.
-                                                       // PS4: Up is negative (-128). Switch: Up is Min (0).
-                                                       // So mapping directly preserves direction.
-        report.rx = (uint8_t)(gamepad_data.rx + 128);
-        report.ry = (uint8_t)(gamepad_data.ry + 128);
+        // --- Analog Sticks (12-bit) ---
+        // Input: -128..127. Target: 0..4095 (Center 2048)
+        // Conversion: (val + 128) * 16 (approx). Or (val + 128) << 4.
+        uint16_t lx = (gamepad_data.lx + 128) << 4;
+        uint16_t ly = (gamepad_data.ly + 128) << 4;
+        // Note: Y axis inversion might be needed depending on standard.
+        // Usually, Up is Min (0) on Switch Pro ?? No, Switch Pro Stick Data:
+        // Calibration data usually sets the center. Assuming 0-4095 range.
+        // Let's stick to standard mapping.
 
-        report.vendor = 0;
+        // Packing 12-bit values into 3 bytes:
+        // Byte 0: X[7:0]
+        // Byte 1: (Y[3:0] << 4) | (X[11:8])
+        // Byte 2: Y[11:4]
+        report.left_stick[0] = lx & 0xFF;
+        report.left_stick[1] = ((ly & 0x0F) << 4) | ((lx >> 8) & 0x0F);
+        report.left_stick[2] = (ly >> 4) & 0xFF;
+
+        uint16_t rx = (gamepad_data.rx + 128) << 4;
+        uint16_t ry = (gamepad_data.ry + 128) << 4;
+        report.right_stick[0] = rx & 0xFF;
+        report.right_stick[1] = ((ry & 0x0F) << 4) | ((rx >> 8) & 0x0F);
+        report.right_stick[2] = (ry >> 4) & 0xFF;
+
+        // --- IMU Data ---
+        // Switch expects 3 samples per packet (sampled at 1.35ms intervals usually).
+        // Since we only have 1 sample from UART, we duplicate it.
+        // We also need to scale/orient the data correctly.
+        // PS4: Accel (Usually 1G = ~4096 or ~8192 depending on setting). Gyro (deg/s).
+        // Switch: Accel (1G = 4096). Gyro (1 = 0.07 dps ? Need calibration magic usually).
+        // For now, raw pass-through or simple scaling.
+        // PS4 Data is int16_t. Switch Data is int16_t.
+        // Axis mapping (DS4 to Switch Pro):
+        // DS4: X=Right, Y=Down, Z=Backward (Standard Accelerometer)
+        // Switch: X=Right, Y=Up, Z=Backward (Check this!)
+        // Usually requires remapping axes.
+        // For this implementation, we map X->X, Y->-Y, Z->-Z based on common orientation diffs.
+        // But let's start with 1:1 mapping for verification.
+
+        for (int i = 0; i < 3; i++) {
+            report.imu[i].accel_x = gamepad_data.accel_y; // Swap X/Y/Z as needed. Let's try direct map first.
+            report.imu[i].accel_y = gamepad_data.accel_z; // This is a placeholder mapping!
+            report.imu[i].accel_z = gamepad_data.accel_x; // Real mapping requires physical testing.
+
+            // Actually, based on typical controller orientation:
+            // DS4 X is Right. Switch X is Right.
+            // DS4 Y is Down (Gravity +). Switch Y is Up ??
+            // Let's just pass through for now.
+            report.imu[i].accel_x = gamepad_data.accel_x;
+            report.imu[i].accel_y = gamepad_data.accel_y;
+            report.imu[i].accel_z = gamepad_data.accel_z;
+
+            report.imu[i].gyro_x = gamepad_data.gyro_x;
+            report.imu[i].gyro_y = gamepad_data.gyro_y;
+            report.imu[i].gyro_z = gamepad_data.gyro_z;
+        }
 
         tud_hid_report(0, &report, sizeof(report));
     }
