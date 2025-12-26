@@ -11,6 +11,8 @@
 
 #if CFG_TUD_HID_SONY
 #include "ds4_report.h"
+#elif CFG_TUD_HID_NINTENDO
+#include "switch_report.h"
 #endif
 
 // GPIO Pin for the 433MHz RF Transmitter's DATA line
@@ -211,6 +213,61 @@ void hid_task(void) {
       static uint8_t ds4_report_counter = 0;
       report.report_counter = ds4_report_counter++;
       tud_hid_report(0, &report, sizeof(report));
+    }
+  #elif CFG_TUD_HID_NINTENDO
+    if ( tud_hid_ready() ) {
+        hid_nintendo_report_t report = {0};
+
+        // Button Mapping
+        // PS4 Cross (0) -> Switch B
+        if ((gamepad_data.buttons >> 0) & 1) report.buttons |= SWITCH_MASK_B;
+        // PS4 Circle (1) -> Switch A
+        if ((gamepad_data.buttons >> 1) & 1) report.buttons |= SWITCH_MASK_A;
+        // PS4 Square (2) -> Switch Y
+        if ((gamepad_data.buttons >> 2) & 1) report.buttons |= SWITCH_MASK_Y;
+        // PS4 Triangle (3) -> Switch X
+        if ((gamepad_data.buttons >> 3) & 1) report.buttons |= SWITCH_MASK_X;
+
+        // PS4 L1 (4) -> Switch L
+        if ((gamepad_data.buttons >> 4) & 1) report.buttons |= SWITCH_MASK_L;
+        // PS4 R1 (5) -> Switch R
+        if ((gamepad_data.buttons >> 5) & 1) report.buttons |= SWITCH_MASK_R;
+        // PS4 L2 (6) -> Switch ZL
+        if ((gamepad_data.buttons >> 6) & 1) report.buttons |= SWITCH_MASK_ZL;
+        // PS4 R2 (7) -> Switch ZR
+        if ((gamepad_data.buttons >> 7) & 1) report.buttons |= SWITCH_MASK_ZR;
+
+        // PS4 Share (8) -> Switch Minus
+        if ((gamepad_data.buttons >> 8) & 1) report.buttons |= SWITCH_MASK_MINUS;
+        // PS4 Options (9) -> Switch Plus
+        if ((gamepad_data.buttons >> 9) & 1) report.buttons |= SWITCH_MASK_PLUS;
+
+        // PS4 L3 (10) -> Switch L3
+        if ((gamepad_data.buttons >> 10) & 1) report.buttons |= SWITCH_MASK_L3;
+        // PS4 R3 (11) -> Switch R3
+        if ((gamepad_data.buttons >> 11) & 1) report.buttons |= SWITCH_MASK_R3;
+
+        // PS4 PS (12) -> Switch Home
+        if ((gamepad_data.buttons >> 12) & 1) report.buttons |= SWITCH_MASK_HOME;
+        // PS4 Touchpad (13) -> Switch Capture
+        if ((gamepad_data.buttons >> 13) & 1) report.buttons |= SWITCH_MASK_CAPTURE;
+
+        // DPAD Mapping
+        // 0->8 (Neutral), 1->0 (Up), 2->4 (Down), 4->6 (Left), 8->2 (Right)
+        static const uint8_t dpad_map[16] = { 8, 0, 4, 8, 6, 7, 5, 8, 2, 1, 3, 8, 8, 8, 8, 8 };
+        report.hat = dpad_map[gamepad_data.dpad & 0x0F];
+
+        // Analog Sticks (int8 -128..127 -> uint8 0..255)
+        report.lx = (uint8_t)(gamepad_data.lx + 128);
+        report.ly = (uint8_t)(gamepad_data.ly + 128); // Check if Y needs inversion? Usually Standard is Up=Min or Up=Max.
+                                                       // PS4: Up is negative (-128). Switch: Up is Min (0).
+                                                       // So mapping directly preserves direction.
+        report.rx = (uint8_t)(gamepad_data.rx + 128);
+        report.ry = (uint8_t)(gamepad_data.ry + 128);
+
+        report.vendor = 0;
+
+        tud_hid_report(0, &report, sizeof(report));
     }
   #endif
 }
