@@ -31,7 +31,7 @@ include(pico_sdk_import.cmake)
 project(RP C CXX ASM)
 
 # --- Add build-time option for output mode ---
-set(OUTPUT_MODE "DS4" CACHE STRING "Gamepad output mode (GENERIC, SWITCH, DS4)")
+set(OUTPUT_MODE "SWITCH" CACHE STRING "Gamepad output mode (GENERIC, SWITCH, DS4)")
 set_property(CACHE OUTPUT_MODE PROPERTY STRINGS "GENERIC" "SWITCH" "DS4")
 message(STATUS "Gamepad Output Mode set to: ${OUTPUT_MODE}")
 
